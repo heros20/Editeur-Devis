@@ -1,0 +1,60 @@
+{
+  "name": "atelier-du-bois",
+  "version": "1.0.1",
+  "description": "Logiciel de bureau de gestion devis, bons de commande et factures pour L'Atelier du Bois.",
+  "main": "electron/main.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "node scripts/start.cjs",
+    "dist": "npm run build && electron-builder",
+    "portable": "npm run build && electron-builder --win portable"
+  },
+  "keywords": [
+    "electron",
+    "devis",
+    "facture",
+    "menuiserie"
+  ],
+  "author": "L'Atelier du Bois",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "build": {
+    "appId": "fr.atelierdubois.editeurdevis",
+    "productName": "L'Atelier du Bois",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
