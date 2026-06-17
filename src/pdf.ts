@@ -70,13 +70,13 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
           <h1>${esc(company.name)}</h1>
           <p>${esc(company.address)} - ${esc(company.postalCode)} ${esc(company.city)}</p>
           <p>${esc(company.phone)} - ${esc(company.email)}</p>
-          <p>SIRET ${esc(company.siret || "a renseigner")} ${company.vatNumber ? `- TVA ${esc(company.vatNumber)}` : ""}</p>
+          <p>SIRET ${esc(company.siret || "à renseigner")} ${company.vatNumber ? `- TVA ${esc(company.vatNumber)}` : ""}</p>
         </div>
         <div class="meta">
           <h2>${esc(labels[doc.type])}</h2>
           <p><strong>${esc(doc.number)}</strong></p>
           <p>Date: ${esc(doc.issueDate)}</p>
-          <p>Echeance: ${esc(doc.dueDate)}</p>
+          <p>Échéance: ${esc(doc.dueDate)}</p>
           <span class="badge">${esc(statusLabels[doc.status])}</span>
         </div>
       </header>
@@ -92,8 +92,8 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <div class="box">
           <h3>Chantier</h3>
           <p>${esc(doc.siteAddress || client?.address)}</p>
-          <p>Demarrage: ${esc(doc.workStart || "a definir")}</p>
-          <p>Duree estimee: ${esc(doc.workDuration || "a definir")}</p>
+          <p>Démarrage: ${esc(doc.workStart || "à définir")}</p>
+          <p>Durée estimée: ${esc(doc.workDuration || "à définir")}</p>
           <p>Acompte: ${esc(doc.depositRate)}%</p>
         </div>
       </section>
@@ -102,7 +102,7 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <p>${esc(doc.notes)}</p>
       </section>
       <table>
-        <thead><tr><th>Designation</th><th>Unite</th><th class="num">Qté</th><th class="num">PU HT</th><th class="num">Rem.</th><th class="num">TVA</th><th class="num">Total HT</th></tr></thead>
+        <thead><tr><th>Désignation</th><th>Unité</th><th class="num">Qté</th><th class="num">PU HT</th><th class="num">Rem.</th><th class="num">TVA</th><th class="num">Total HT</th></tr></thead>
         <tbody>${lines}</tbody>
       </table>
       <section class="totals">
@@ -112,9 +112,63 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
       </section>
       <section class="terms">
         <div><h3>Conditions</h3><p>${esc(doc.terms || company.paymentTerms)}</p></div>
-        <div><h3>Coordonnees bancaires</h3><p>IBAN: ${esc(company.iban || "a renseigner")}\nBIC: ${esc(company.bic || "a renseigner")}</p></div>
+        <div><h3>Coordonnées bancaires</h3><p>IBAN: ${esc(company.iban || "à renseigner")}\nBIC: ${esc(company.bic || "à renseigner")}</p></div>
       </section>
-      <footer>${esc(company.legalName)} - Document genere par L'Atelier du Bois</footer>
+      <footer>${esc(company.legalName)} - Document généré par L'Atelier du Bois</footer>
+    </main>
+  </body>
+  </html>`;
+}
+
+export function renderCompanyHtml(company: CompanySettings) {
+  const rows = [
+    ["Nom commercial", company.name],
+    ["Raison sociale", company.legalName],
+    ["SIRET", company.siret],
+    ["N TVA", company.vatNumber],
+    ["Adresse", `${company.address}\n${company.postalCode} ${company.city}`.trim()],
+    ["Téléphone", company.phone],
+    ["Email", company.email],
+    ["Site web", company.website],
+    ["IBAN", company.iban],
+    ["BIC", company.bic],
+    ["Validité devis", `${company.quoteValidityDays} jours`],
+    ["TVA par défaut", `${company.defaultVatRate}%`],
+    ["Acompte par défaut", `${company.defaultDepositRate}%`],
+    ["Conditions de paiement", company.paymentTerms],
+    ["Note par défaut", company.notes],
+  ];
+
+  return `<!doctype html>
+  <html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Arial, sans-serif; color: #241b16; background: #fff; }
+      .page { width: 210mm; min-height: 297mm; padding: 18mm; }
+      header { border-bottom: 3px solid #1f5f52; padding-bottom: 14px; margin-bottom: 18px; }
+      h1 { margin: 0; font-size: 30px; color: #1f5f52; }
+      p { margin: 5px 0 0; color: #5d5149; }
+      table { width: 100%; border-collapse: collapse; }
+      th { width: 42mm; text-align: left; color: #7b4b28; font-size: 12px; text-transform: uppercase; }
+      td, th { border-bottom: 1px solid #e5ddd4; padding: 10px 8px; vertical-align: top; white-space: pre-wrap; }
+      footer { margin-top: 22px; color: #766b63; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>${esc(company.name || company.legalName || "Informations société")}</h1>
+        <p>${esc(company.legalName)}</p>
+      </header>
+      <table>
+        <tbody>
+          ${rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "à renseigner")}</td></tr>`).join("")}
+        </tbody>
+      </table>
+      <footer>Fiche société générée par L'Atelier du Bois</footer>
     </main>
   </body>
   </html>`;

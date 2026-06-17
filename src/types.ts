@@ -64,8 +64,38 @@ export interface BusinessDocument {
   notes: string;
   terms: string;
   lines: LineItem[];
+  history: DocumentHistoryEntry[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DocumentSnapshot {
+  type: DocumentType;
+  number: string;
+  status: DocumentStatus;
+  clientId: string;
+  issueDate: string;
+  dueDate: string;
+  projectName: string;
+  siteAddress: string;
+  workStart: string;
+  workDuration: string;
+  depositRate: number;
+  notes: string;
+  terms: string;
+  lines: LineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentHistoryEntry {
+  id: string;
+  transformedAt: string;
+  fromType: DocumentType;
+  fromNumber: string;
+  toType: DocumentType;
+  toNumber: string;
+  snapshot: DocumentSnapshot;
 }
 
 export interface CatalogItem {

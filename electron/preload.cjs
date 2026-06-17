@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld("atelierApi", {
   uuid: () => ipcRenderer.invoke("app:uuid"),
   savePdf: (payload) => ipcRenderer.invoke("dialog:save-pdf", payload),
   exportJson: (data) => ipcRenderer.invoke("dialog:export-json", data),
+  openEmail: (payload) => ipcRenderer.invoke("app:open-email", payload),
 });

@@ -12,22 +12,23 @@ Double-cliquer:
 LANCER-ATELIER-DU-BOIS.bat
 ```
 
-Le lanceur utilise d'abord la version portable si elle existe:
+Le lanceur utilise d'abord la version portable si elle existe, sinon il demarre le mode developpement:
 
 ```text
-release\L'Atelier du Bois 1.0.0.exe
+release\L'Atelier du Bois 1.0.1.exe
 ```
 
 ## Lancer depuis le terminal
 
 ```bash
-npm start
+npm run dev
 ```
 
-## Developpement
+## Lancer le build local
 
 ```bash
-npm run dev
+npm run build
+npm start
 ```
 
 ## Regenerer la version portable

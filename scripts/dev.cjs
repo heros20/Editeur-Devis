@@ -3,15 +3,15 @@ const http = require("node:http");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const isWindows = process.platform === "win32";
-const viteBin = path.join(root, "node_modules", ".bin", isWindows ? "vite.cmd" : "vite");
-const electronBin = path.join(root, "node_modules", ".bin", isWindows ? "electron.cmd" : "electron");
+const viteCli = path.join(path.dirname(require.resolve("vite/package.json")), "bin", "vite.js");
+const electronBin = require("electron");
 
 const children = [];
-delete process.env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
 
 function run(command, args) {
-  const child = spawn(command, args, { cwd: root, stdio: "inherit", shell: false, env: process.env });
+  const child = spawn(command, args, { cwd: root, stdio: "inherit", shell: false, env });
   children.push(child);
   child.on("exit", (code) => {
     if (code && !shuttingDown) process.exit(code);
@@ -47,7 +47,7 @@ function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-run(viteBin, ["--host", "127.0.0.1"]);
+run(process.execPath, [viteCli, "--host", "127.0.0.1"]);
 waitForVite()
   .then(() => run(electronBin, ["."]))
   .catch((error) => {

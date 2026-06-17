@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 
-const isDev = !app.isPackaged;
+const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
 let mainWindow;
 
 protocol.registerSchemesAsPrivileged([
@@ -57,6 +57,13 @@ const defaultData = {
   ],
 };
 
+defaultData.company.paymentTerms = "30% d'acompte à la commande, solde à réception des travaux.";
+defaultData.catalog = defaultData.catalog.map((item) => {
+  if (item.id === "cat-2") return { ...item, name: "Placard / dressing mélaminé" };
+  if (item.id === "cat-3") return { ...item, name: "Bibliothèque chêne plaqué" };
+  return item;
+});
+
 function getDataPath() {
   return path.join(app.getPath("userData"), "atelier-du-bois-data.json");
 }
@@ -75,7 +82,16 @@ async function ensureDataFile() {
 async function readStore() {
   const file = await ensureDataFile();
   const raw = await fs.readFile(file, "utf8");
-  return { ...defaultData, ...JSON.parse(raw) };
+  const parsed = JSON.parse(raw);
+  return {
+    ...defaultData,
+    ...parsed,
+    company: { ...defaultData.company, ...(parsed.company || {}) },
+    counters: { ...defaultData.counters, ...(parsed.counters || {}) },
+    clients: Array.isArray(parsed.clients) ? parsed.clients : [],
+    documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+    catalog: Array.isArray(parsed.catalog) && parsed.catalog.length ? parsed.catalog : defaultData.catalog,
+  };
 }
 
 async function writeStore(data) {
@@ -105,6 +121,19 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+
+  if (!isDev) {
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [
+            "default-src 'self' atelier:; script-src 'self' atelier:; style-src 'self' atelier:; img-src 'self' atelier: data: blob:; font-src 'self' atelier: data:; connect-src 'self' atelier:;",
+          ],
+        },
+      });
+    });
+  }
 
   if (isDev) {
     mainWindow.loadURL("http://127.0.0.1:5173");
@@ -138,13 +167,19 @@ ipcMain.handle("store:save", async (_event, data) => writeStore(data));
 ipcMain.handle("store:next-number", async (_event, type) => {
   const data = await readStore();
   const prefixes = { quote: "DEV", order: "BC", invoice: "FAC", client: "CLI" };
-  const number = makeNumber(prefixes[type], data.counters[type] || 1);
-  data.counters[type] = (data.counters[type] || 1) + 1;
-  await writeStore(data);
-  return number;
+  return makeNumber(prefixes[type], data.counters[type] || 1);
 });
 
 ipcMain.handle("app:uuid", () => crypto.randomUUID());
+
+ipcMain.handle("app:open-email", async (_event, { to, subject, body }) => {
+  const params = new URLSearchParams({
+    subject: subject || "",
+    body: body || "",
+  });
+  await shell.openExternal(`mailto:${encodeURIComponent(to || "")}?${params.toString()}`);
+  return { opened: true };
+});
 
 ipcMain.handle("dialog:save-pdf", async (_event, { html, defaultPath }) => {
   const target = await dialog.showSaveDialog(mainWindow, {
