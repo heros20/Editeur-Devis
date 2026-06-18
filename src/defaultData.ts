@@ -6,7 +6,9 @@ import type {
   CompanySettings,
   DocumentHistoryEntry,
   DocumentSnapshot,
+  DocumentStatus,
   DocumentType,
+  DocumentAttachment,
   LineItem,
 } from "./types";
 import { addDaysIso, makeId, todayIso } from "./utils";
@@ -66,6 +68,10 @@ function normalizeDocumentType(value: unknown, fallback: DocumentType): Document
   return documentTypes.includes(value as DocumentType) ? (value as DocumentType) : fallback;
 }
 
+function normalizeDocumentStatus(value: unknown): DocumentStatus {
+  return value === "paid" ? "paid" : "draft";
+}
+
 function normalizeClient(client: Partial<Client>): Client {
   return {
     id: client.id || makeId("client"),
@@ -97,10 +103,25 @@ function normalizeLine(line: Partial<LineItem>, defaultVatRate: number): LineIte
 }
 
 function normalizeLines(lines: unknown, defaultVatRate: number): LineItem[] {
-  if (Array.isArray(lines) && lines.length) {
+  if (Array.isArray(lines)) {
     return lines.map((line) => normalizeLine(line, defaultVatRate));
   }
-  return [normalizeLine({}, defaultVatRate)];
+  return [];
+}
+
+function normalizeAttachment(attachment: Partial<DocumentAttachment>): DocumentAttachment {
+  return {
+    id: attachment.id || makeId("attachment"),
+    name: attachment.name || "Pièce jointe",
+    filePath: attachment.filePath || "",
+    size: normalizeNumber(attachment.size, 0),
+    addedAt: attachment.addedAt || new Date().toISOString(),
+  };
+}
+
+function normalizeAttachments(attachments: unknown): DocumentAttachment[] {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.map(normalizeAttachment).filter((attachment) => attachment.filePath);
 }
 
 function normalizeSnapshot(snapshot: Partial<DocumentSnapshot>, defaultVatRate: number): DocumentSnapshot {
@@ -108,7 +129,7 @@ function normalizeSnapshot(snapshot: Partial<DocumentSnapshot>, defaultVatRate: 
   return {
     type: normalizeDocumentType(snapshot.type, "quote"),
     number: snapshot.number || "DEV-0000",
-    status: snapshot.status || "draft",
+    status: normalizeDocumentStatus(snapshot.status),
     clientId: snapshot.clientId || "",
     issueDate,
     dueDate: snapshot.dueDate || addDaysIso(issueDate, 30),
@@ -120,6 +141,7 @@ function normalizeSnapshot(snapshot: Partial<DocumentSnapshot>, defaultVatRate: 
     notes: snapshot.notes || "",
     terms: snapshot.terms || defaultCompany.paymentTerms,
     lines: normalizeLines(snapshot.lines, defaultVatRate),
+    attachments: normalizeAttachments(snapshot.attachments),
     createdAt: snapshot.createdAt || new Date().toISOString(),
     updatedAt: snapshot.updatedAt || new Date().toISOString(),
   };
@@ -144,7 +166,7 @@ function normalizeDocument(doc: Partial<BusinessDocument>, defaultVatRate: numbe
     id: doc.id || makeId("doc"),
     type: normalizeDocumentType(doc.type, "quote"),
     number: doc.number || "DEV-0000",
-    status: doc.status || "draft",
+    status: normalizeDocumentStatus(doc.status),
     clientId: doc.clientId || "",
     issueDate,
     dueDate: doc.dueDate || addDaysIso(issueDate, 30),
@@ -157,6 +179,7 @@ function normalizeDocument(doc: Partial<BusinessDocument>, defaultVatRate: numbe
     notes: doc.notes || "",
     terms: doc.terms || defaultCompany.paymentTerms,
     lines: normalizeLines(doc.lines, defaultVatRate),
+    attachments: normalizeAttachments(doc.attachments),
     history: normalizeHistory(doc.history, defaultVatRate),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || new Date().toISOString(),

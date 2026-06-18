@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, shell, net, Menu } = requ
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
 const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
@@ -68,6 +69,107 @@ function getDataPath() {
   return path.join(app.getPath("userData"), "atelier-du-bois-data.json");
 }
 
+function getBackupRoot() {
+  return path.join(app.getPath("userData"), "backups");
+}
+
+function getOneDriveCandidates() {
+  return [
+    process.env.OneDriveCommercial,
+    process.env.OneDriveConsumer,
+    process.env.OneDrive,
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "OneDrive") : "",
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "OneDrive - Personal") : "",
+  ].filter(Boolean);
+}
+
+function getAttachmentsDir(documentId) {
+  return path.join(app.getPath("userData"), "attachments", String(documentId || "documents"));
+}
+
+function safeAttachmentName(fileName) {
+  return path.basename(fileName || "piece-jointe").replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-");
+}
+
+function backupTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyDirectoryContents(source, target) {
+  if (!(await pathExists(source))) return;
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.cp(source, target, { recursive: true, force: true });
+}
+
+async function cleanupSnapshots(root, keep = 40) {
+  const snapshotsDir = path.join(root, "snapshots");
+  if (!(await pathExists(snapshotsDir))) return;
+  const entries = await fs.readdir(snapshotsDir, { withFileTypes: true });
+  const folders = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  await Promise.all(folders.slice(keep).map((name) => fs.rm(path.join(snapshotsDir, name), { recursive: true, force: true })));
+}
+
+async function writeBackupSet(root, data, makeSnapshot) {
+  const latestDir = path.join(root, "latest");
+  const attachmentsDir = path.join(app.getPath("userData"), "attachments");
+  await fs.mkdir(latestDir, { recursive: true });
+  await fs.writeFile(path.join(latestDir, "atelier-du-bois-data.json"), JSON.stringify(data, null, 2), "utf8");
+  await copyDirectoryContents(attachmentsDir, path.join(latestDir, "attachments"));
+
+  if (makeSnapshot) {
+    const snapshotDir = path.join(root, "snapshots", backupTimestamp());
+    await fs.mkdir(snapshotDir, { recursive: true });
+    await fs.writeFile(path.join(snapshotDir, "atelier-du-bois-data.json"), JSON.stringify(data, null, 2), "utf8");
+    await copyDirectoryContents(attachmentsDir, path.join(snapshotDir, "attachments"));
+    await cleanupSnapshots(root);
+  }
+}
+
+async function getOneDriveBackupRoot() {
+  for (const candidate of getOneDriveCandidates()) {
+    if (await pathExists(candidate)) {
+      return path.join(candidate, "Atelier du Bois", "Sauvegardes");
+    }
+  }
+  return "";
+}
+
+let lastSnapshotAt = 0;
+let backupQueue = Promise.resolve();
+
+function scheduleAutomaticBackups(data) {
+  const payload = JSON.parse(JSON.stringify(data));
+  backupQueue = backupQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const now = Date.now();
+      const makeSnapshot = now - lastSnapshotAt > 10 * 60 * 1000;
+      if (makeSnapshot) lastSnapshotAt = now;
+
+      await writeBackupSet(path.join(getBackupRoot(), "local"), payload, makeSnapshot);
+      const oneDriveRoot = await getOneDriveBackupRoot();
+      if (oneDriveRoot) {
+        await writeBackupSet(oneDriveRoot, payload, makeSnapshot);
+      }
+    })
+    .catch((error) => {
+      console.warn("Sauvegarde automatique indisponible", error);
+    });
+}
+
 async function ensureDataFile() {
   const file = getDataPath();
   try {
@@ -97,6 +199,7 @@ async function readStore() {
 async function writeStore(data) {
   const file = await ensureDataFile();
   await fs.writeFile(file, JSON.stringify(data, null, 2), "utf8");
+  scheduleAutomaticBackups(data);
   return data;
 }
 
@@ -172,23 +275,22 @@ ipcMain.handle("store:next-number", async (_event, type) => {
 
 ipcMain.handle("app:uuid", () => crypto.randomUUID());
 
+function mailtoUrl({ to, subject, body }) {
+  const params = [
+    ["subject", subject || ""],
+    ["body", body || ""],
+  ]
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `mailto:${encodeURIComponent(to || "")}?${params}`;
+}
+
 ipcMain.handle("app:open-email", async (_event, { to, subject, body }) => {
-  const params = new URLSearchParams({
-    subject: subject || "",
-    body: body || "",
-  });
-  await shell.openExternal(`mailto:${encodeURIComponent(to || "")}?${params.toString()}`);
+  await shell.openExternal(mailtoUrl({ to, subject, body }));
   return { opened: true };
 });
 
-ipcMain.handle("dialog:save-pdf", async (_event, { html, defaultPath }) => {
-  const target = await dialog.showSaveDialog(mainWindow, {
-    title: "Exporter en PDF",
-    defaultPath,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (target.canceled || !target.filePath) return { canceled: true };
-
+async function createPdfFile(html, filePath) {
   const pdfWindow = new BrowserWindow({
     show: false,
     width: 794,
@@ -201,10 +303,118 @@ ipcMain.handle("dialog:save-pdf", async (_event, { html, defaultPath }) => {
     pageSize: "A4",
     margins: { marginType: "none" },
   });
-  await fs.writeFile(target.filePath, pdf);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, pdf);
   pdfWindow.close();
+}
+
+async function openOutlookDraft({ to, subject, body, attachmentPath }) {
+  const payload = JSON.stringify({ to: to || "", subject: subject || "", body: body || "", attachmentPath });
+  const script = `
+$ErrorActionPreference = "Stop"
+$data = $env:ATELIER_MAIL_PAYLOAD | ConvertFrom-Json
+$outlook = New-Object -ComObject Outlook.Application
+$mail = $outlook.CreateItem(0)
+if ($data.to) { $mail.To = $data.to }
+$mail.Subject = $data.subject
+$mail.Body = $data.body
+$null = $mail.Attachments.Add($data.attachmentPath)
+$mail.Display()
+`;
+  await new Promise((resolve, reject) => {
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-"], {
+      windowsHide: true,
+      env: { ...process.env, ATELIER_MAIL_PAYLOAD: payload },
+      stdio: ["pipe", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr || `Outlook a refuse le brouillon email (${code}).`));
+    });
+    child.stdin.end(script);
+  });
+}
+
+function encodeMailHeader(value) {
+  const text = String(value || "");
+  return /^[\x00-\x7F]*$/.test(text) ? text : `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`;
+}
+
+function chunkBase64(value) {
+  return value.match(/.{1,76}/g)?.join("\r\n") || "";
+}
+
+async function createEmlDraft({ to, subject, body, attachmentPath }) {
+  const boundary = `----=_AtelierDuBois_${crypto.randomUUID()}`;
+  const attachmentName = path.basename(attachmentPath);
+  const attachment = await fs.readFile(attachmentPath);
+  const emlPath = path.join(app.getPath("temp"), "atelier-du-bois", "emails", `${Date.now()}-message.eml`);
+  const lines = [
+    "X-Unsent: 1",
+    to ? `To: ${to}` : "",
+    `Subject: ${encodeMailHeader(subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="utf-8"',
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    body || "",
+    "",
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${encodeMailHeader(attachmentName)}"`,
+    `Content-Disposition: attachment; filename="${encodeMailHeader(attachmentName)}"`,
+    "Content-Transfer-Encoding: base64",
+    "",
+    chunkBase64(attachment.toString("base64")),
+    "",
+    `--${boundary}--`,
+    "",
+  ].filter((line, index) => index !== 1 || Boolean(line));
+  await fs.mkdir(path.dirname(emlPath), { recursive: true });
+  await fs.writeFile(emlPath, lines.join("\r\n"), "utf8");
+  const error = await shell.openPath(emlPath);
+  if (error) throw new Error(error);
+  return emlPath;
+}
+
+ipcMain.handle("dialog:save-pdf", async (_event, { html, defaultPath }) => {
+  const target = await dialog.showSaveDialog(mainWindow, {
+    title: "Exporter en PDF",
+    defaultPath,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (target.canceled || !target.filePath) return { canceled: true };
+
+  await createPdfFile(html, target.filePath);
   shell.showItemInFolder(target.filePath);
   return { canceled: false, filePath: target.filePath };
+});
+
+ipcMain.handle("app:email-pdf", async (_event, { html, defaultPath, to, subject, body }) => {
+  const fileName = path.basename(defaultPath || "document.pdf").replace(/[<>:"/\\|?*]+/g, "-");
+  const filePath = path.join(app.getPath("temp"), "atelier-du-bois", "emails", `${Date.now()}-${fileName}`);
+  await createPdfFile(html, filePath);
+
+  try {
+    await openOutlookDraft({ to, subject, body, attachmentPath: filePath });
+    return { opened: true, filePath };
+  } catch (error) {
+    console.warn("Ouverture Outlook COM impossible, creation d'un brouillon EML", error);
+    try {
+      const emlPath = await createEmlDraft({ to, subject, body, attachmentPath: filePath });
+      return { opened: true, filePath, emlPath };
+    } catch (emlError) {
+      console.warn("Creation du brouillon EML impossible", emlError);
+      return { opened: false, filePath, fallback: true };
+    }
+  }
 });
 
 ipcMain.handle("dialog:export-json", async (_event, data) => {
@@ -217,4 +427,54 @@ ipcMain.handle("dialog:export-json", async (_event, data) => {
   await fs.writeFile(target.filePath, JSON.stringify(data, null, 2), "utf8");
   shell.showItemInFolder(target.filePath);
   return { canceled: false, filePath: target.filePath };
+});
+
+ipcMain.handle("dialog:select-attachments", async (_event, documentId) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Ajouter une piece jointe",
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      { name: "Documents", extensions: ["pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx", "txt"] },
+      { name: "Tous les fichiers", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true, attachments: [] };
+
+  const targetDir = getAttachmentsDir(documentId);
+  await fs.mkdir(targetDir, { recursive: true });
+  const attachments = [];
+  for (const sourcePath of result.filePaths) {
+    const stat = await fs.stat(sourcePath);
+    const originalName = path.basename(sourcePath);
+    const id = crypto.randomUUID();
+    const storedName = `${id}-${safeAttachmentName(originalName)}`;
+    const filePath = path.join(targetDir, storedName);
+    await fs.copyFile(sourcePath, filePath);
+    attachments.push({
+      id,
+      name: originalName,
+      filePath,
+      size: stat.size,
+      addedAt: new Date().toISOString(),
+    });
+  }
+  return { canceled: false, attachments };
+});
+
+ipcMain.handle("app:open-attachment", async (_event, attachment) => {
+  if (!attachment?.filePath) return { opened: false };
+  const error = await shell.openPath(attachment.filePath);
+  return { opened: !error, error };
+});
+
+ipcMain.handle("app:delete-attachment", async (_event, attachment) => {
+  if (!attachment?.filePath) return { deleted: false };
+  try {
+    await fs.unlink(attachment.filePath);
+    return { deleted: true };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { deleted: true };
+    console.warn("Suppression piece jointe impossible", error);
+    return { deleted: false };
+  }
 });

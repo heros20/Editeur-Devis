@@ -1,5 +1,5 @@
 export type DocumentType = "quote" | "order" | "invoice";
-export type DocumentStatus = "draft" | "sent" | "accepted" | "ordered" | "invoiced" | "paid" | "canceled";
+export type DocumentStatus = "draft" | "paid";
 
 export interface CompanySettings {
   name: string;
@@ -47,6 +47,14 @@ export interface LineItem {
   discount: number;
 }
 
+export interface DocumentAttachment {
+  id: string;
+  name: string;
+  filePath: string;
+  size: number;
+  addedAt: string;
+}
+
 export interface BusinessDocument {
   id: string;
   type: DocumentType;
@@ -64,6 +72,7 @@ export interface BusinessDocument {
   notes: string;
   terms: string;
   lines: LineItem[];
+  attachments: DocumentAttachment[];
   history: DocumentHistoryEntry[];
   createdAt: string;
   updatedAt: string;
@@ -84,6 +93,7 @@ export interface DocumentSnapshot {
   notes: string;
   terms: string;
   lines: LineItem[];
+  attachments: DocumentAttachment[];
   createdAt: string;
   updatedAt: string;
 }

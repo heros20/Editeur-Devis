@@ -1,17 +1,21 @@
 import {
   Archive,
+  ArrowLeft,
   Building2,
   Check,
   ChevronRight,
   Clipboard,
   CopyPlus,
   Download,
+  ExternalLink,
   FileCheck2,
   FileText,
   History,
   Home,
+  LoaderCircle,
   Mail,
   PackageCheck,
+  Paperclip,
   Plus,
   ReceiptText,
   Search,
@@ -30,6 +34,7 @@ import type {
   CatalogItem,
   Client,
   CompanySettings,
+  DocumentAttachment,
   DocumentSnapshot,
   DocumentStatus,
   DocumentType,
@@ -50,7 +55,56 @@ import {
   totals,
 } from "./utils";
 
-type View = "dashboard" | "documents" | "catalog" | "clients" | "settings";
+type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients" | "settings";
+
+function normalizeSearch(value = "") {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function companyInitials(name: string) {
+  const ignoredWords = new Set(["d", "de", "des", "du", "l", "la", "le", "les"]);
+  const words = normalizeSearch(name)
+    .replace(/['-]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word && !ignoredWords.has(word));
+  return (words[0]?.[0] ?? "S").toUpperCase() + (words[1]?.[0] ?? "").toUpperCase();
+}
+
+function clientSearchText(client: Client) {
+  return normalizeSearch(
+    [
+      client.number,
+      client.type,
+      client.name,
+      client.contact,
+      client.email,
+      client.phone,
+      client.address,
+      client.postalCode,
+      client.city,
+      client.notes,
+    ].filter(Boolean).join(" ")
+  );
+}
+
+function activityDate(doc: BusinessDocument) {
+  return doc.updatedAt || doc.issueDate || doc.createdAt || "";
+}
+
+function formatShortDate(date: string) {
+  if (!date) return "Date inconnue";
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(date));
+}
+
+function fileSizeLabel(size: number) {
+  if (!size) return "Taille inconnue";
+  if (size < 1024) return `${size} o`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
+  return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
+}
 
 const emptyLine = (vatRate = 20): LineItem => ({
   id: makeId("line"),
@@ -80,6 +134,8 @@ export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
+  const [clientQuery, setClientQuery] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState("");
   const [typeFilter, setTypeFilter] = useState<DocumentType | "all">("all");
   const [notice, setNotice] = useState("");
 
@@ -91,7 +147,6 @@ export function App() {
         if (!active) return;
         const normalized = normalizeData(loadedData);
         setData(normalized);
-        setSelectedId(normalized.documents[0]?.id ?? "");
       })
       .catch((error) => {
         console.error("Impossible de charger les donnees", error);
@@ -106,12 +161,6 @@ export function App() {
       active = false;
     };
   }, [api]);
-
-  useEffect(() => {
-    if (!selectedId && data.documents.length) {
-      setSelectedId(data.documents[0].id);
-    }
-  }, [data.documents, selectedId]);
 
   async function persist(next: AppData, message = "Enregistre") {
     const normalized = normalizeData(next);
@@ -190,6 +239,7 @@ export function App() {
       notes: doc.notes,
       terms: doc.terms,
       lines: duplicateLines(doc.lines),
+      attachments: [...(doc.attachments || [])],
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
     };
@@ -227,6 +277,7 @@ export function App() {
       data.company.siret,
       data.company.email,
       ...doc.lines.flatMap((line) => [line.description, line.details, line.unit, String(line.unitPrice)]),
+      ...doc.attachments.map((attachment) => attachment.name),
       ...doc.history.flatMap((entry) => [entry.fromNumber, entry.toNumber, labels[entry.fromType], labels[entry.toType], entry.snapshot.projectName]),
     ].filter(Boolean).join(" ").toLowerCase();
   }
@@ -236,18 +287,59 @@ export function App() {
     [data.clients]
   );
   const sortedDocuments = useMemo(
-    () => [...data.documents].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.number.localeCompare(a.number)),
+    () => [...data.documents].sort((a, b) => {
+      const clientA = clientLabel(data.clients.find((client) => client.id === a.clientId));
+      const clientB = clientLabel(data.clients.find((client) => client.id === b.clientId));
+      return clientA.localeCompare(clientB, "fr") || b.updatedAt.localeCompare(a.updatedAt) || b.number.localeCompare(a.number);
+    }),
+    [data.clients, data.documents]
+  );
+  const recentDocuments = useMemo(
+    () => [...data.documents].sort((a, b) => activityDate(b).localeCompare(activityDate(a)) || b.number.localeCompare(a.number)),
     [data.documents]
   );
+  const filteredClients = useMemo(() => {
+    const terms = normalizeSearch(clientQuery).split(/\s+/).filter(Boolean);
+    if (!terms.length) return sortedClients;
+    return sortedClients.filter((client) => terms.every((term) => clientSearchText(client).includes(term)));
+  }, [clientQuery, sortedClients]);
   const sortedCatalog = useMemo(
     () => [...data.catalog].sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "fr")),
     [data.catalog]
   );
   const selectedDoc = useMemo(() => data.documents.find((doc) => doc.id === selectedId), [data.documents, selectedId]);
   const selectedClient = useMemo(() => data.clients.find((client) => client.id === selectedDoc?.clientId), [data.clients, selectedDoc]);
+  const selectedClientForEdit = useMemo(() => data.clients.find((client) => client.id === selectedClientId), [data.clients, selectedClientId]);
+  const companyDisplayName = data.company.name.trim() || "Societe";
+
+  useEffect(() => {
+    if (view !== "clients") return;
+    if (!filteredClients.length) {
+      if (selectedClientId) setSelectedClientId("");
+      return;
+    }
+    if (!filteredClients.some((client) => client.id === selectedClientId)) {
+      setSelectedClientId(filteredClients[0].id);
+    }
+  }, [filteredClients, selectedClientId, view]);
 
   if (!loaded) {
     return <main className="loading">Chargement de L'Atelier du Bois...</main>;
+  }
+
+  function openDocument(id: string) {
+    setSelectedId(id);
+    setView("documentDetail");
+  }
+
+  function pageTitle() {
+    if (view === "dashboard") return "Pilotage commercial";
+    if (view === "documents") return "Devis, BC et factures";
+    if (view === "documentDetail" && selectedDoc) return `${labels[selectedDoc.type]} ${selectedDoc.number}`;
+    if (view === "documentDetail") return "Document";
+    if (view === "catalog") return "Articles et prestations";
+    if (view === "clients") return "Fichier clients";
+    return "Parametres societe";
   }
 
   const filteredDocuments = sortedDocuments
@@ -272,13 +364,13 @@ export function App() {
   );
   const statusCounts = data.documents.reduce<Record<DocumentStatus, number>>(
     (acc, doc) => ({ ...acc, [doc.status]: acc[doc.status] + 1 }),
-    { draft: 0, sent: 0, accepted: 0, ordered: 0, invoiced: 0, paid: 0, canceled: 0 }
+    { draft: 0, paid: 0 }
   );
   const pendingValue = data.documents
-    .filter((doc) => doc.status === "sent" || doc.status === "accepted" || doc.status === "ordered" || doc.status === "invoiced")
+    .filter((doc) => doc.status !== "paid")
     .reduce((sum, doc) => sum + totals(doc.lines).totalTtc, 0);
   const dueDocuments = data.documents
-    .filter((doc) => doc.dueDate && doc.status !== "paid" && doc.status !== "canceled")
+    .filter((doc) => doc.dueDate && doc.status !== "paid")
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 5);
 
@@ -286,6 +378,7 @@ export function App() {
     const reserved = await reserveNumber("client", data);
     const client = buildClient(reserved.number, "Nouveau client");
     await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Client cree");
+    setSelectedClientId(client.id);
     setView("clients");
   }
 
@@ -308,14 +401,15 @@ export function App() {
       depositRate: reserved.data.company.defaultDepositRate,
       notes: reserved.data.company.notes,
       terms: reserved.data.company.paymentTerms,
-      lines: [emptyLine(reserved.data.company.defaultVatRate)],
+      lines: [],
+      attachments: [],
       history: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} cree`);
     setSelectedId(doc.id);
-    setView("documents");
+    setView("documentDetail");
   }
 
   async function convertDocument(source: BusinessDocument, type: DocumentType) {
@@ -326,7 +420,7 @@ export function App() {
       ...source,
       type,
       number: reserved.number,
-      status: type === "order" ? "ordered" : "invoiced",
+      status: "draft",
       issueDate,
       dueDate: addDaysIso(issueDate, 30),
       history: [
@@ -356,15 +450,7 @@ export function App() {
   }
 
   async function advanceStatus(doc: BusinessDocument) {
-    const nextStatus: DocumentStatus =
-      doc.type === "quote"
-        ? doc.status === "draft"
-          ? "sent"
-          : "accepted"
-        : doc.type === "invoice"
-          ? "paid"
-          : "ordered";
-    await updateDocument({ ...doc, status: nextStatus });
+    await updateDocument({ ...doc, status: "paid" });
   }
 
   async function duplicateDocument(source: BusinessDocument) {
@@ -376,19 +462,45 @@ export function App() {
       status: "draft",
       originId: source.id,
       lines: duplicateLines(source.lines),
+      attachments: [],
       history: [...source.history],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     await persist({ ...reserved.data, documents: [duplicate, ...reserved.data.documents] }, `${labels[source.type]} duplique`);
     setSelectedId(duplicate.id);
-    setView("documents");
+    setView("documentDetail");
   }
 
   async function deleteDocument(doc: BusinessDocument) {
+    await Promise.all((doc.attachments || []).map((attachment) => api.deleteAttachment(attachment).catch(() => ({ deleted: false }))));
     const nextDocs = data.documents.filter((item) => item.id !== doc.id);
     await persist({ ...data, documents: nextDocs }, "Document supprime");
-    setSelectedId(nextDocs[0]?.id ?? "");
+    setSelectedId("");
+    setView("documents");
+  }
+
+  async function addDocumentAttachments(doc: BusinessDocument) {
+    const result = await api.selectAttachments(doc.id);
+    if (result.canceled || !result.attachments.length) return;
+    await updateDocument({ ...doc, attachments: [...doc.attachments, ...result.attachments] });
+    setNotice(`${result.attachments.length} pièce(s) jointe(s) ajoutée(s)`);
+    window.setTimeout(() => setNotice(""), 1800);
+  }
+
+  async function openDocumentAttachment(attachment: DocumentAttachment) {
+    const result = await api.openAttachment(attachment);
+    if (!result.opened) {
+      setNotice("Pièce jointe introuvable");
+      window.setTimeout(() => setNotice(""), 2200);
+    }
+  }
+
+  async function removeDocumentAttachment(doc: BusinessDocument, attachment: DocumentAttachment) {
+    await api.deleteAttachment(attachment);
+    await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
+    setNotice("Pièce jointe supprimée");
+    window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function exportPdf(doc: BusinessDocument) {
@@ -409,19 +521,17 @@ export function App() {
         await persist({ ...data, clients: data.clients.map((item) => (item.id === client.id ? { ...item, email } : item)) }, "Email client ajoute");
       }
     }
-    await api.openEmail({
+    const html = renderDocumentHtml(doc, client, data.company);
+    const name = `${doc.number}-${sanitizeFileName(doc.projectName || labels[doc.type])}.pdf`;
+    const result = await api.emailPdf({
+      html,
+      defaultPath: name,
       to: email,
       subject: `${labels[doc.type]} ${doc.number}${doc.projectName ? ` - ${doc.projectName}` : ""}`,
-      body: [
-        `Bonjour,`,
-        "",
-        `Veuillez trouver ci-joint ${labels[doc.type].toLowerCase()} ${doc.number}.`,
-        doc.projectName ? `Projet: ${doc.projectName}` : "",
-        `Montant TTC: ${currency(totals(doc.lines).totalTtc)}`,
-        "",
-        data.company.name,
-      ].filter(Boolean).join("\n"),
+      body: "",
     });
+    setNotice(result.opened && !result.fallback ? "Email prêt avec PDF joint" : "Impossible de joindre le PDF au mail");
+    window.setTimeout(() => setNotice(""), result.fallback ? 4200 : 1800);
   }
 
   async function updateClient(client: Client) {
@@ -435,6 +545,7 @@ export function App() {
       return;
     }
     await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprime");
+    if (selectedClientId === client.id) setSelectedClientId("");
   }
 
   async function addCatalogLine(doc: BusinessDocument, catalogId: string) {
@@ -506,15 +617,15 @@ export function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brandMark">
-          <div className="logo">AB</div>
+          <div className="logo">{companyInitials(companyDisplayName)}</div>
           <div>
-            <strong>L'Atelier du Bois</strong>
-            <span>Gestion menuiserie</span>
+            <strong>{companyDisplayName}</strong>
+            <span>Gestion commerciale</span>
           </div>
         </div>
         <nav>
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><Home size={18} /> Tableau</button>
-          <button className={view === "documents" ? "active" : ""} onClick={() => setView("documents")}><FileText size={18} /> Documents</button>
+          <button className={view === "documents" || view === "documentDetail" ? "active" : ""} onClick={() => { setSelectedId(""); setView("documents"); }}><FileText size={18} /> Documents</button>
           <button className={view === "catalog" ? "active nested" : "nested"} onClick={() => setView("catalog")}><PackageCheck size={18} /> Articles</button>
           <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Users size={18} /> Clients</button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Settings size={18} /> Societe</button>
@@ -530,7 +641,8 @@ export function App() {
         <header className="topbar">
           <div>
             <span className="eyebrow">Menuiserie et agencement</span>
-            <h1>{view === "dashboard" ? "Pilotage commercial" : view === "documents" ? "Devis, BC et factures" : view === "catalog" ? "Articles et prestations" : view === "clients" ? "Fichier clients" : "Parametres societe"}</h1>
+            <h1>{pageTitle()}</h1>
+            {view === "documentDetail" && selectedDoc && <span className="contextLine">{clientLabel(selectedClient)}</span>}
             {view === "documents" && selectedDoc && <span className="contextLine">{selectedDoc.number} · {clientLabel(selectedClient)}</span>}
           </div>
           <div className="topActions">
@@ -547,24 +659,22 @@ export function App() {
             <div className="kpi"><ReceiptText /><span>Factures</span><strong>{currency(dashboardTotals.invoices)}</strong></div>
             <div className="kpi"><FileCheck2 /><span>A encaisser</span><strong>{currency(pendingValue)}</strong></div>
             <div className="panel compact">
-              <div className="panelTitle"><h2>Pipeline</h2></div>
+              <div className="panelTitle"><h2>Suivi des affaires</h2></div>
               <div className="statusGrid">
                 <StatusPill status="draft" count={statusCounts.draft} />
-                <StatusPill status="sent" count={statusCounts.sent} />
-                <StatusPill status="accepted" count={statusCounts.accepted} />
-                <StatusPill status="invoiced" count={statusCounts.invoiced} />
+                <StatusPill status="paid" count={statusCounts.paid} />
               </div>
             </div>
             <div className="panel compact">
               <div className="panelTitle"><h2>Echeances</h2></div>
-              <DueRows docs={dueDocuments} clients={data.clients} onOpen={(id) => { setSelectedId(id); setView("documents"); }} />
+              <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
             </div>
             <div className="panel wide">
               <div className="panelTitle">
                 <h2>Activite recente</h2>
                 <button onClick={() => createDocument("quote")}><Plus size={17} /> Creer un devis</button>
               </div>
-              <DocumentRows docs={filteredDocuments.slice(0, 8)} clients={data.clients} onOpen={(id) => { setSelectedId(id); setView("documents"); }} />
+              <DocumentRows docs={recentDocuments.slice(0, 8)} clients={data.clients} onOpen={openDocument} />
             </div>
           </section>
         )}
@@ -584,7 +694,7 @@ export function App() {
                   const sum = totals(doc.lines).totalTtc;
                   const client = data.clients.find((item) => item.id === doc.clientId);
                   return (
-                    <button key={doc.id} className={selectedId === doc.id ? "docCard selected" : "docCard"} onClick={() => setSelectedId(doc.id)}>
+                    <button key={doc.id} className={selectedId === doc.id ? "docCard selected" : "docCard"} onClick={() => openDocument(doc.id)}>
                       <span>{labels[doc.type]} <strong>{doc.number}</strong></span>
                       <b>{doc.projectName || "Sans nom"}</b>
                       <small>{clientLabel(client)}</small>
@@ -597,6 +707,22 @@ export function App() {
                 }) : <div className="emptyRows">Aucun document ne correspond.</div>}
               </div>
             </aside>
+            {!filteredDocuments.length && (
+              <div className="emptyState">
+                <FileText size={42} />
+                <h2>{data.documents.length ? "Aucun resultat" : "Aucun document"}</h2>
+                <p>{data.documents.length ? "Aucun devis, bon de commande ou facture ne correspond a cette recherche." : "Creez un premier devis pour demarrer le flux devis, bon de commande, facture."}</p>
+                <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {view === "documentDetail" && (
+          <section className="documentPage">
+            <div className="documentPageBar">
+              <button className="ghost" onClick={() => { setSelectedId(""); setView("documents"); }}><ArrowLeft size={17} /> Retour aux documents</button>
+            </div>
             {selectedDoc ? (
               <DocumentEditor
                 doc={selectedDoc}
@@ -610,13 +736,16 @@ export function App() {
                 onDuplicate={duplicateDocument}
                 onAdvanceStatus={advanceStatus}
                 onAddCatalogLine={addCatalogLine}
+                onAddAttachment={addDocumentAttachments}
+                onOpenAttachment={openDocumentAttachment}
+                onRemoveAttachment={removeDocumentAttachment}
               />
             ) : (
               <div className="emptyState">
                 <FileText size={42} />
-                <h2>Aucun document</h2>
-                <p>Creez un premier devis pour demarrer le flux devis, bon de commande, facture.</p>
-                <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>
+                <h2>Document introuvable</h2>
+                <p>Le document selectionne n'existe plus ou n'a pas encore ete charge.</p>
+                <button onClick={() => { setSelectedId(""); setView("documents"); }}><ArrowLeft size={17} /> Retour aux documents</button>
               </div>
             )}
           </section>
@@ -627,11 +756,45 @@ export function App() {
         )}
 
         {view === "clients" && (
-          <section className="clientsGrid">
-            {sortedClients.map((client) => (
-              <ClientCard key={client.id} client={client} onChange={updateClient} onDelete={deleteClient} />
-            ))}
-            <button className="addTile" onClick={createClient}><UserPlus /> Ajouter un client</button>
+          <section className="clientsPanel">
+            <div className="clientsToolbar">
+              <div className="searchBox">
+                <Search size={17} />
+                <input
+                  value={clientQuery}
+                  onChange={(event) => setClientQuery(event.target.value)}
+                  placeholder="Rechercher par numero client, nom, contact, email, telephone, ville..."
+                />
+              </div>
+              <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>
+            </div>
+            <div className="listMeta">{filteredClients.length} client(s)</div>
+            <div className="clientsLayout">
+              <div className="clientList">
+                {filteredClients.map((client) => (
+                  <button
+                    key={client.id}
+                    className={selectedClientId === client.id ? "clientListRow selected" : "clientListRow"}
+                    onClick={() => setSelectedClientId(client.id)}
+                  >
+                    <span>{client.number}</span>
+                    <strong>{client.name || "Client sans nom"}</strong>
+                    <em>{client.contact || client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
+                  </button>
+                ))}
+                {!filteredClients.length && <div className="emptyRows">Aucun client ne correspond.</div>}
+              </div>
+              {selectedClientForEdit ? (
+                <ClientCard client={selectedClientForEdit} onChange={updateClient} onDelete={deleteClient} />
+              ) : (
+                <div className="emptyState clientEmpty">
+                  <Users size={42} />
+                  <h2>{data.clients.length ? "Aucun client sélectionné" : "Aucun client"}</h2>
+                  <p>{data.clients.length ? "Sélectionnez un client dans la liste pour modifier sa fiche." : "Ajoutez votre premier client pour le retrouver ici."}</p>
+                  <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -681,8 +844,8 @@ function DocumentRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; cli
     <div className="rows">
       {docs.map((doc) => (
         <button key={doc.id} onClick={() => onOpen(doc.id)}>
-          <span>{labels[doc.type]}</span>
-          <strong>{doc.number}</strong>
+          <span>{formatShortDate(activityDate(doc))}</span>
+          <strong>{labels[doc.type]} {doc.number}</strong>
           <em>{clientLabel(clients.find((client) => client.id === doc.clientId))}</em>
           <b>{currency(totals(doc.lines).totalTtc)}</b>
           <StatusBadge status={doc.status} />
@@ -733,6 +896,9 @@ function DocumentEditor({
   onDuplicate,
   onAdvanceStatus,
   onAddCatalogLine,
+  onAddAttachment,
+  onOpenAttachment,
+  onRemoveAttachment,
 }: {
   doc: BusinessDocument;
   clients: Client[];
@@ -740,19 +906,32 @@ function DocumentEditor({
   onChange: (doc: BusinessDocument) => void;
   onDelete: (doc: BusinessDocument) => void;
   onExport: (doc: BusinessDocument) => void;
-  onEmail: (doc: BusinessDocument) => void;
+  onEmail: (doc: BusinessDocument) => Promise<void>;
   onConvert: (doc: BusinessDocument, type: DocumentType) => void;
   onDuplicate: (doc: BusinessDocument) => void;
   onAdvanceStatus: (doc: BusinessDocument) => void;
   onAddCatalogLine: (doc: BusinessDocument, catalogId: string) => void;
+  onAddAttachment: (doc: BusinessDocument) => void;
+  onOpenAttachment: (attachment: DocumentAttachment) => void;
+  onRemoveAttachment: (doc: BusinessDocument, attachment: DocumentAttachment) => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const sums = totals(doc.lines);
   const client = clients.find((item) => item.id === doc.clientId);
-  const quickStatusLabel = doc.type === "invoice" ? "Marquer paye" : doc.type === "quote" && doc.status === "draft" ? "Envoyer" : "Valider";
+  const quickStatusLabel = "Marquer payé";
   const patch = (partial: Partial<BusinessDocument>) => onChange({ ...doc, ...partial });
   const patchLine = (id: string, partial: Partial<LineItem>) =>
     patch({ lines: doc.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
+  const sendEmail = async () => {
+    if (emailing) return;
+    setEmailing(true);
+    try {
+      await onEmail(doc);
+    } finally {
+      setEmailing(false);
+    }
+  };
 
   return (
     <article className="editor">
@@ -772,7 +951,10 @@ function DocumentEditor({
           {doc.type === "quote" && <button onClick={() => onConvert(doc, "order")}><PackageCheck size={17} /> Transformer en BC</button>}
           {doc.type === "order" && <button onClick={() => onConvert(doc, "invoice")}><ReceiptText size={17} /> Facturer</button>}
           <button onClick={() => onExport(doc)}><Download size={17} /> PDF</button>
-          <button className="ghost" onClick={() => onEmail(doc)}><Mail size={17} /> Email</button>
+          <button className="ghost" disabled={emailing} onClick={sendEmail}>
+            {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
+            {emailing ? "Préparation..." : "Email"}
+          </button>
           <button className="danger" onClick={() => onDelete(doc)}><Trash2 size={17} /></button>
         </div>
       </div>
@@ -816,6 +998,25 @@ function DocumentEditor({
           </div>
         ))}
       </div>
+
+      <section className="attachmentsPanel">
+        <div className="panelTitle">
+          <h3><Paperclip size={18} /> Pièces jointes</h3>
+          <button className="ghost" onClick={() => onAddAttachment(doc)}><Paperclip size={17} /> Ajouter</button>
+        </div>
+        <div className="attachmentList">
+          {doc.attachments.length ? doc.attachments.map((attachment) => (
+            <div className="attachmentRow" key={attachment.id}>
+              <div>
+                <strong>{attachment.name}</strong>
+                <span>{fileSizeLabel(attachment.size)} - ajoute le {formatShortDate(attachment.addedAt)}</span>
+              </div>
+              <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la pièce jointe"><ExternalLink size={16} /></button>
+              <button className="iconButton dangerIcon" onClick={() => onRemoveAttachment(doc, attachment)} title="Supprimer la pièce jointe"><Trash2 size={16} /></button>
+            </div>
+          )) : <div className="emptyRows compactEmpty">Aucune pièce jointe ajoutée.</div>}
+        </div>
+      </section>
 
       <div className="bottomEditor">
         <label>Note document<textarea placeholder="Informations affichees sur ce document" value={doc.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>

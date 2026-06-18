@@ -15,22 +15,12 @@ export const labels: Record<DocumentType, string> = {
 
 export const statusLabels: Record<string, string> = {
   draft: "Brouillon",
-  sent: "Envoyé",
-  accepted: "Accepté",
-  ordered: "Commandé",
-  invoiced: "Facturé",
   paid: "Payé",
-  canceled: "Annulé",
 };
 
 export const statusTone: Record<string, string> = {
   draft: "neutral",
-  sent: "info",
-  accepted: "success",
-  ordered: "info",
-  invoiced: "warning",
   paid: "success",
-  canceled: "danger",
 };
 
 export function makeId(prefix = "id") {
@@ -98,7 +88,5 @@ export function duplicateLines(lines: LineItem[]): LineItem[] {
 }
 
 export function nextStatus(doc: BusinessDocument) {
-  if (doc.type === "quote") return doc.status === "draft" ? "sent" : "accepted";
-  if (doc.type === "order") return "ordered";
   return doc.status === "paid" ? "paid" : "paid";
 }
