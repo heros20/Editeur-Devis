@@ -14,23 +14,23 @@ import type {
 import { addDaysIso, makeId, todayIso } from "./utils";
 
 export const defaultCompany: CompanySettings = {
-  name: "L'Atelier du Bois",
-  legalName: "L'Atelier du Bois",
+  name: "",
+  legalName: "",
   siret: "",
   vatNumber: "",
-  address: "12 rue des Copeaux",
-  postalCode: "75000",
-  city: "Paris",
-  phone: "01 23 45 67 89",
-  email: "contact@atelier-du-bois.fr",
+  address: "",
+  postalCode: "",
+  city: "",
+  phone: "",
+  email: "",
   website: "",
   iban: "",
   bic: "",
-  paymentTerms: "30% d'acompte à la commande, solde à réception des travaux.",
+  paymentTerms: "",
   quoteValidityDays: 30,
   defaultVatRate: 20,
   defaultDepositRate: 30,
-  notes: "Fabrication sur mesure en atelier, pose comprise selon descriptif.",
+  notes: "",
 };
 
 export const defaultCatalog: CatalogItem[] = [
@@ -114,6 +114,9 @@ function normalizeAttachment(attachment: Partial<DocumentAttachment>): DocumentA
     id: attachment.id || makeId("attachment"),
     name: attachment.name || "Pièce jointe",
     filePath: attachment.filePath || "",
+    storagePath: attachment.storagePath,
+    mimeType: attachment.mimeType,
+    dataUrl: attachment.dataUrl,
     size: normalizeNumber(attachment.size, 0),
     addedAt: attachment.addedAt || new Date().toISOString(),
   };

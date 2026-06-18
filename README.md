@@ -1,6 +1,6 @@
-# Editeur Devis - L'Atelier du Bois
+# Devix
 
-Logiciel de bureau Electron pour une entreprise de menuiserie.
+Logiciel de bureau Electron pour gerer les devis, bons de commande et factures.
 
 Fonctions principales:
 
@@ -8,7 +8,7 @@ Fonctions principales:
 - creation de devis
 - transformation devis vers bon de commande
 - transformation devis/BC vers facture
-- lignes de prestations menuiserie
+- lignes d'articles et prestations
 - calcul HT, TVA, TTC et acompte
 - export PDF
 - sauvegarde locale

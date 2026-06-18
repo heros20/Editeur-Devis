@@ -114,8 +114,8 @@ const browserApi: AtelierApi = {
     return { canceled: false, filePath: defaultPath };
   },
   async exportJson(data) {
-    downloadBlob(JSON.stringify(normalizeData(data), null, 2), "atelier-du-bois-sauvegarde.json", "application/json;charset=utf-8");
-    return { canceled: false, filePath: "atelier-du-bois-sauvegarde.json" };
+    downloadBlob(JSON.stringify(normalizeData(data), null, 2), "devix-sauvegarde.json", "application/json;charset=utf-8");
+    return { canceled: false, filePath: "devix-sauvegarde.json" };
   },
   async openEmail(payload) {
     window.location.href = mailtoUrl(payload);
@@ -129,13 +129,18 @@ const browserApi: AtelierApi = {
     const files = await chooseFiles();
     if (!files.length) return { canceled: true, attachments: [] };
     const attachments = await Promise.all(
-      files.map(async (file) => ({
-        id: crypto.randomUUID(),
-        name: file.name,
-        filePath: await readFileAsDataUrl(file),
-        size: file.size,
-        addedAt: new Date().toISOString(),
-      }))
+      files.map(async (file) => {
+        const dataUrl = await readFileAsDataUrl(file);
+        return {
+          id: crypto.randomUUID(),
+          name: file.name,
+          filePath: dataUrl,
+          dataUrl,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          addedAt: new Date().toISOString(),
+        };
+      })
     );
     return { canceled: false, attachments };
   },

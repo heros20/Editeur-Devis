@@ -1,7 +1,7 @@
 {
-  "name": "atelier-du-bois",
+  "name": "devix",
   "version": "1.0.1",
-  "description": "Logiciel de bureau de gestion devis, bons de commande et factures pour L'Atelier du Bois.",
+  "description": "Logiciel de gestion de devis, bons de commande et factures.",
   "main": "electron/main.cjs",
   "type": "commonjs",
   "scripts": {
@@ -15,11 +15,12 @@
     "electron",
     "devis",
     "facture",
-    "menuiserie"
+    "gestion"
   ],
-  "author": "L'Atelier du Bois",
+  "author": "Devix",
   "license": "UNLICENSED",
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
@@ -34,8 +35,8 @@
     "vite": "^8.0.16"
   },
   "build": {
-    "appId": "fr.atelierdubois.editeurdevis",
-    "productName": "L'Atelier du Bois",
+    "appId": "fr.devix.editeurdevis",
+    "productName": "Devix",
     "directories": {
       "output": "release"
     },
@@ -43,6 +44,14 @@
       "dist/**/*",
       "electron/**/*",
       "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Devix",
+        "schemes": [
+          "atelier"
+        ]
+      }
     ],
     "win": {
       "target": [

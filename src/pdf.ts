@@ -98,7 +98,7 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         </div>
       </section>
       <section class="project">
-        <h3>${esc(doc.projectName || "Projet de menuiserie")}</h3>
+        <h3>${esc(doc.projectName || "Projet")}</h3>
         <p>${esc(doc.notes)}</p>
       </section>
       <table>
@@ -114,7 +114,7 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <div><h3>Conditions</h3><p>${esc(doc.terms || company.paymentTerms)}</p></div>
         <div><h3>Coordonnées bancaires</h3><p>IBAN: ${esc(company.iban || "à renseigner")}\nBIC: ${esc(company.bic || "à renseigner")}</p></div>
       </section>
-      <footer>${esc(company.legalName)} - Document généré par L'Atelier du Bois</footer>
+      <footer>${esc(company.legalName)} - Document généré par Devix</footer>
     </main>
   </body>
   </html>`;
@@ -168,7 +168,7 @@ export function renderCompanyHtml(company: CompanySettings) {
           ${rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "à renseigner")}</td></tr>`).join("")}
         </tbody>
       </table>
-      <footer>Fiche société générée par L'Atelier du Bois</footer>
+      <footer>Fiche société générée par Devix</footer>
     </main>
   </body>
   </html>`;

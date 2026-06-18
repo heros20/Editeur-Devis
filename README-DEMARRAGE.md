@@ -1,4 +1,4 @@
-# L'Atelier du Bois - demarrage local
+# Devix - demarrage local
 
 Ce projet est un vrai logiciel de bureau Electron.
 
@@ -15,7 +15,7 @@ LANCER-ATELIER-DU-BOIS.bat
 Le lanceur utilise d'abord la version portable si elle existe, sinon il demarre le mode developpement:
 
 ```text
-release\L'Atelier du Bois 1.0.1.exe
+release\Devix 1.0.1.exe
 ```
 
 ## Lancer depuis le terminal

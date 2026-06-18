@@ -1,5 +1,4 @@
 import {
-  Archive,
   ArrowLeft,
   Building2,
   Check,
@@ -13,6 +12,7 @@ import {
   History,
   Home,
   LoaderCircle,
+  LogOut,
   Mail,
   PackageCheck,
   Paperclip,
@@ -24,10 +24,38 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { createDefaultAppData, normalizeData } from "./defaultData";
 import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { getAtelierApi } from "./runtimeApi";
+import {
+  createTeamInvitation,
+  deleteRemoteAttachment,
+  deleteTeamInvitation,
+  getCurrentSession,
+  listTeamInvitations,
+  listTeamMembers,
+  loadRemoteWorkspace,
+  onRemoteAuthStateChange,
+  openRemoteAttachment,
+  removeTeamMember,
+  reserveRemoteCounter,
+  saveRemoteWorkspace,
+  sendPasswordSetupEmail,
+  signInWithGoogle,
+  signInWithPassword,
+  signOutRemote,
+  signUpWithPassword,
+  updateTeamMemberRole,
+  updateCurrentUserPassword,
+  uploadRemoteAttachment,
+  type InviteRole,
+  type TeamInvitation,
+  type TeamMember,
+  type WorkspaceContext,
+  type WorkspaceRole,
+} from "./supabaseStore";
 import type {
   AppData,
   BusinessDocument,
@@ -56,21 +84,22 @@ import {
 } from "./utils";
 
 type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients" | "settings";
+type AuthMode = "signin" | "signup";
+
+const roleLabels: Record<WorkspaceRole, string> = {
+  owner: "Proprietaire",
+  admin: "Admin",
+  editor: "Edition",
+  viewer: "Lecture",
+};
+
+const inviteRoleOptions: InviteRole[] = ["admin", "editor", "viewer"];
 
 function normalizeSearch(value = "") {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-}
-
-function companyInitials(name: string) {
-  const ignoredWords = new Set(["d", "de", "des", "du", "l", "la", "le", "les"]);
-  const words = normalizeSearch(name)
-    .replace(/['-]/g, " ")
-    .split(/\s+/)
-    .filter((word) => word && !ignoredWords.has(word));
-  return (words[0]?.[0] ?? "S").toUpperCase() + (words[1]?.[0] ?? "").toUpperCase();
 }
 
 function clientSearchText(client: Client) {
@@ -138,35 +167,94 @@ export function App() {
   const [selectedClientId, setSelectedClientId] = useState("");
   const [typeFilter, setTypeFilter] = useState<DocumentType | "all">("all");
   const [notice, setNotice] = useState("");
+  const [session, setSession] = useState<Session | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InviteRole>("editor");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountPasswordConfirm, setAccountPasswordConfirm] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
+
+  function userFacingError(error: unknown, fallback: string) {
+    const raw = error instanceof Error ? error.message : String((error as { message?: string })?.message || "");
+    const message = raw.toLowerCase();
+    if (message.includes("invalid login credentials")) return "Email ou mot de passe incorrect.";
+    if (message.includes("email not confirmed")) return "Confirmez votre email avant de vous connecter.";
+    if (message.includes("provider") || message.includes("oauth")) return "Connexion Google pas encore active.";
+    if (message.includes("failed to fetch") || message.includes("network")) return "Connexion internet indisponible.";
+    if (raw && !message.includes("supabase")) return raw;
+    return fallback;
+  }
 
   useEffect(() => {
     let active = true;
-    api
-      .loadStore()
-      .then((loadedData) => {
+
+    async function loadWorkspace(nextSession: Session | null) {
+      setSession(nextSession);
+      if (!nextSession) {
+        setWorkspace(null);
+        setData(createDefaultAppData());
+        setLoaded(true);
+        return;
+      }
+
+      setLoaded(false);
+      try {
+        const remote = await loadRemoteWorkspace();
         if (!active) return;
-        const normalized = normalizeData(loadedData);
-        setData(normalized);
-      })
-      .catch((error) => {
+        setWorkspace(remote.context);
+        setData(normalizeData(remote.data));
+        setLoadError("");
+      } catch (error) {
         console.error("Impossible de charger les donnees", error);
         if (!active) return;
-        setLoadError("Chargement impossible, demarrage avec un dossier local vide.");
-      })
-      .finally(() => {
+        setWorkspace(null);
+        setData(createDefaultAppData());
+        setLoadError("Impossible de charger vos donnees. Reessayez dans quelques instants.");
+      } finally {
+        if (active) setLoaded(true);
+      }
+    }
+
+    getCurrentSession()
+      .then((currentSession) => loadWorkspace(currentSession))
+      .catch((error) => {
+        console.error("Session indisponible", error);
         if (!active) return;
+        setSession(null);
         setLoaded(true);
+        setLoadError("Connexion impossible. Verifiez votre acces internet.");
       });
+
+    const unsubscribe = onRemoteAuthStateChange((nextSession) => {
+      if (!active) return;
+      void loadWorkspace(nextSession);
+    });
+
     return () => {
       active = false;
+      unsubscribe();
     };
-  }, [api]);
+  }, []);
 
   async function persist(next: AppData, message = "Enregistre") {
     const normalized = normalizeData(next);
     setData(normalized);
     try {
-      await api.saveStore(normalized);
+      if (workspace) {
+        const nextWorkspace = await saveRemoteWorkspace(workspace, normalized);
+        setWorkspace(nextWorkspace);
+      } else {
+        await api.saveStore(normalized);
+      }
       setNotice(message);
     } catch (error) {
       console.error("Impossible d'enregistrer les donnees", error);
@@ -176,20 +264,22 @@ export function App() {
   }
 
   async function reserveNumber(type: DocumentType | "client", source: AppData) {
-    const count = source.counters[type] || 1;
-    let number = formatBusinessNumber(type, count);
-    try {
-      number = await api.nextNumber(type);
-    } catch (error) {
-      console.warn("Numerotation locale utilisee", error);
+    let count = source.counters[type] || 1;
+    if (workspace) {
+      try {
+        count = await reserveRemoteCounter(workspace, type);
+      } catch (error) {
+        console.warn("Numerotation distante indisponible, compteur local utilise", error);
+      }
     }
+    const number = formatBusinessNumber(type, count);
     return {
       number,
       data: {
         ...source,
         counters: {
           ...source.counters,
-          [type]: count + 1,
+          [type]: Math.max(source.counters[type] || 1, count + 1),
         },
       },
     };
@@ -310,7 +400,7 @@ export function App() {
   const selectedDoc = useMemo(() => data.documents.find((doc) => doc.id === selectedId), [data.documents, selectedId]);
   const selectedClient = useMemo(() => data.clients.find((client) => client.id === selectedDoc?.clientId), [data.clients, selectedDoc]);
   const selectedClientForEdit = useMemo(() => data.clients.find((client) => client.id === selectedClientId), [data.clients, selectedClientId]);
-  const companyDisplayName = data.company.name.trim() || "Societe";
+  const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin";
 
   useEffect(() => {
     if (view !== "clients") return;
@@ -323,8 +413,221 @@ export function App() {
     }
   }, [filteredClients, selectedClientId, view]);
 
+  async function refreshTeam() {
+    if (!workspace) {
+      setTeamMembers([]);
+      setTeamInvitations([]);
+      return;
+    }
+    setTeamBusy(true);
+    try {
+      const [members, invitations] = await Promise.all([
+        listTeamMembers(workspace),
+        canManageTeam ? listTeamInvitations(workspace) : Promise.resolve([]),
+      ]);
+      setTeamMembers(members);
+      setTeamInvitations(invitations);
+    } catch (error) {
+      console.error("Gestion equipe indisponible", error);
+      setNotice(error instanceof Error ? error.message : "Gestion equipe indisponible");
+      window.setTimeout(() => setNotice(""), 2200);
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (view !== "settings" || !workspace) return;
+    void refreshTeam();
+  }, [view, workspace?.organizationId, workspace?.role]);
+
+  async function reloadWorkspace(organizationId?: string) {
+    const remote = await loadRemoteWorkspace(organizationId);
+    setWorkspace(remote.context);
+    setData(normalizeData(remote.data));
+    setLoadError("");
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = authEmail.trim();
+    const password = authPassword.trim();
+    if (!email || !password) {
+      setAuthMessage("Email et mot de passe requis.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      const nextSession = authMode === "signin" ? await signInWithPassword(email, password) : await signUpWithPassword(email, password);
+      if (!nextSession) {
+        setAuthMessage("Compte cree. Verifiez votre boite mail pour confirmer l'inscription.");
+      }
+    } catch (error) {
+      console.error("Connexion impossible", error);
+      setAuthMessage(userFacingError(error, "Connexion impossible."));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function submitGoogleAuth() {
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error("Connexion Google impossible", error);
+      setAuthMessage(userFacingError(error, "Connexion Google impossible."));
+      setAuthBusy(false);
+    }
+  }
+
+  async function requestPasswordSetup() {
+    const email = authEmail.trim();
+    if (!email) {
+      setAuthMessage("Indiquez votre email pour recevoir le lien.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      await sendPasswordSetupEmail(email);
+      setAuthMessage("Email envoye. Ouvrez le lien recu pour definir votre mot de passe.");
+    } catch (error) {
+      console.error("Envoi du lien mot de passe impossible", error);
+      setAuthMessage(userFacingError(error, "Envoi du lien impossible."));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function submitAccountPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (accountPassword !== accountPasswordConfirm) {
+      setNotice("Les mots de passe ne correspondent pas");
+      window.setTimeout(() => setNotice(""), 2200);
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      await updateCurrentUserPassword(accountPassword);
+      setAccountPassword("");
+      setAccountPasswordConfirm("");
+      setNotice("Mot de passe mis a jour");
+    } catch (error) {
+      console.error("Mise a jour mot de passe impossible", error);
+      setNotice(userFacingError(error, "Mot de passe impossible a modifier"));
+    } finally {
+      setAccountBusy(false);
+      window.setTimeout(() => setNotice(""), 2200);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await signOutRemote();
+      setWorkspace(null);
+      setSession(null);
+      setData(createDefaultAppData());
+      setSelectedId("");
+      setTeamMembers([]);
+      setTeamInvitations([]);
+      setInviteEmail("");
+      setView("dashboard");
+    } catch (error) {
+      console.error("Deconnexion impossible", error);
+      setNotice("Deconnexion indisponible");
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
+  async function submitInvitation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspace || !canManageTeam || teamBusy) return;
+    setTeamBusy(true);
+    try {
+      const invitation = await createTeamInvitation(workspace, inviteEmail, inviteRole);
+      setInviteEmail("");
+      setNotice(`Invitation envoyee a ${invitation.email}`);
+      await refreshTeam();
+    } catch (error) {
+      console.error("Invitation impossible", error);
+      setNotice(userFacingError(error, "Invitation impossible"));
+    } finally {
+      setTeamBusy(false);
+      window.setTimeout(() => setNotice(""), 2400);
+    }
+  }
+
+  async function revokeInvitation(invitation: TeamInvitation) {
+    if (!workspace || !canManageTeam || teamBusy) return;
+    setTeamBusy(true);
+    try {
+      await deleteTeamInvitation(workspace, invitation.id);
+      await refreshTeam();
+      setNotice("Invitation supprimee");
+    } catch (error) {
+      console.error("Suppression invitation impossible", error);
+      setNotice(userFacingError(error, "Suppression impossible"));
+    } finally {
+      setTeamBusy(false);
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
+  async function changeMemberRole(member: TeamMember, role: InviteRole) {
+    if (!workspace || !canManageTeam || teamBusy || member.role === "owner" || member.isCurrentUser) return;
+    setTeamBusy(true);
+    try {
+      await updateTeamMemberRole(workspace, member.id, role);
+      await refreshTeam();
+      setNotice("Droits mis a jour");
+    } catch (error) {
+      console.error("Modification droits impossible", error);
+      setNotice(userFacingError(error, "Modification impossible"));
+    } finally {
+      setTeamBusy(false);
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
+  async function deleteMember(member: TeamMember) {
+    if (!workspace || !canManageTeam || teamBusy || member.role === "owner" || member.isCurrentUser) return;
+    setTeamBusy(true);
+    try {
+      await removeTeamMember(workspace, member.id);
+      await refreshTeam();
+      setNotice("Employe retire");
+    } catch (error) {
+      console.error("Retrait employe impossible", error);
+      setNotice(userFacingError(error, "Retrait impossible"));
+    } finally {
+      setTeamBusy(false);
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
   if (!loaded) {
-    return <main className="loading">Chargement de L'Atelier du Bois...</main>;
+    return <main className="loading">Chargement de Devix...</main>;
+  }
+
+  if (!session) {
+    return (
+      <AuthScreen
+        mode={authMode}
+        email={authEmail}
+        password={authPassword}
+        busy={authBusy}
+        message={authMessage || loadError}
+        onModeChange={setAuthMode}
+        onEmailChange={setAuthEmail}
+        onPasswordChange={setAuthPassword}
+        onSubmit={submitAuth}
+        onGoogleAuth={submitGoogleAuth}
+        onPasswordSetup={requestPasswordSetup}
+      />
+    );
   }
 
   function openDocument(id: string) {
@@ -473,7 +776,13 @@ export function App() {
   }
 
   async function deleteDocument(doc: BusinessDocument) {
-    await Promise.all((doc.attachments || []).map((attachment) => api.deleteAttachment(attachment).catch(() => ({ deleted: false }))));
+    await Promise.all(
+      (doc.attachments || []).map((attachment) =>
+        workspace
+          ? deleteRemoteAttachment(attachment).catch(() => undefined)
+          : api.deleteAttachment(attachment).catch(() => ({ deleted: false }))
+      )
+    );
     const nextDocs = data.documents.filter((item) => item.id !== doc.id);
     await persist({ ...data, documents: nextDocs }, "Document supprime");
     setSelectedId("");
@@ -483,24 +792,43 @@ export function App() {
   async function addDocumentAttachments(doc: BusinessDocument) {
     const result = await api.selectAttachments(doc.id);
     if (result.canceled || !result.attachments.length) return;
-    await updateDocument({ ...doc, attachments: [...doc.attachments, ...result.attachments] });
-    setNotice(`${result.attachments.length} pièce(s) jointe(s) ajoutée(s)`);
+    const attachments = workspace
+      ? await Promise.all(result.attachments.map((attachment) => uploadRemoteAttachment(workspace, doc.id, attachment)))
+      : result.attachments;
+    await updateDocument({ ...doc, attachments: [...doc.attachments, ...attachments] });
+    setNotice(`${attachments.length} piece(s) jointe(s) ajoutee(s)`);
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function openDocumentAttachment(attachment: DocumentAttachment) {
-    const result = await api.openAttachment(attachment);
-    if (!result.opened) {
-      setNotice("Pièce jointe introuvable");
-      window.setTimeout(() => setNotice(""), 2200);
+    try {
+      if (workspace) {
+        await openRemoteAttachment(attachment);
+        return;
+      }
+      const result = await api.openAttachment(attachment);
+      if (result.opened) return;
+    } catch (error) {
+      console.warn("Ouverture piece jointe impossible", error);
     }
+    setNotice("Piece jointe introuvable");
+    window.setTimeout(() => setNotice(""), 2200);
   }
 
   async function removeDocumentAttachment(doc: BusinessDocument, attachment: DocumentAttachment) {
-    await api.deleteAttachment(attachment);
-    await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
-    setNotice("Pièce jointe supprimée");
-    window.setTimeout(() => setNotice(""), 1800);
+    try {
+      if (workspace) {
+        await deleteRemoteAttachment(attachment);
+      } else {
+        await api.deleteAttachment(attachment);
+      }
+    } catch (error) {
+      console.warn("Suppression piece jointe impossible", error);
+    } finally {
+      await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
+      setNotice("Piece jointe supprimee");
+      window.setTimeout(() => setNotice(""), 2200);
+    }
   }
 
   async function exportPdf(doc: BusinessDocument) {
@@ -617,10 +945,10 @@ export function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brandMark">
-          <div className="logo">{companyInitials(companyDisplayName)}</div>
+          <div className="logo">DV</div>
           <div>
-            <strong>{companyDisplayName}</strong>
-            <span>Gestion commerciale</span>
+            <strong>Devix</strong>
+            <span>{data.company.name.trim() || "Gestion commerciale"}</span>
           </div>
         </div>
         <nav>
@@ -640,7 +968,7 @@ export function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <span className="eyebrow">Menuiserie et agencement</span>
+            <span className="eyebrow">Gestion commerciale</span>
             <h1>{pageTitle()}</h1>
             {view === "documentDetail" && selectedDoc && <span className="contextLine">{clientLabel(selectedClient)}</span>}
             {view === "documents" && selectedDoc && <span className="contextLine">{selectedDoc.number} · {clientLabel(selectedClient)}</span>}
@@ -648,7 +976,8 @@ export function App() {
           <div className="topActions">
             {loadError && <span className="notice warning"><Check size={16} /> {loadError}</span>}
             {notice && <span className="notice"><Check size={16} /> {notice}</span>}
-            <button className="ghost" onClick={() => api.exportJson(data)}><Archive size={17} /> Sauvegarde</button>
+            {workspace && <span className="workspaceBadge">{workspace.organizationName} · {roleLabels[workspace.role]}</span>}
+            <button className="ghost" onClick={signOut}><LogOut size={17} /> Deconnexion</button>
           </div>
         </header>
 
@@ -812,7 +1141,7 @@ export function App() {
               value={data.company}
               onChange={(company) => persist({ ...data, company })}
               fields={[
-                ["name", "Nom commercial", "text", "L'Atelier du Bois"],
+                ["name", "Nom commercial", "text", "Votre societe"],
                 ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
                 ["siret", "SIRET", "text", "123 456 789 00010"],
                 ["vatNumber", "N TVA", "text", "FR..."],
@@ -831,10 +1160,254 @@ export function App() {
             />
             <label className="fullLabel">Conditions de paiement<textarea placeholder="Ex: 30% d'acompte a la commande..." value={data.company.paymentTerms} onChange={(event) => persist({ ...data, company: { ...data.company, paymentTerms: event.target.value } })} /></label>
             <label className="fullLabel">Note par defaut<textarea placeholder="Note affichee sur les nouveaux documents" value={data.company.notes} onChange={(event) => persist({ ...data, company: { ...data.company, notes: event.target.value } })} /></label>
+            {workspace && (
+              <AccountPasswordSettings
+                email={workspace.userEmail}
+                password={accountPassword}
+                confirmPassword={accountPasswordConfirm}
+                busy={accountBusy}
+                onPasswordChange={setAccountPassword}
+                onConfirmPasswordChange={setAccountPasswordConfirm}
+                onSubmit={submitAccountPassword}
+              />
+            )}
+            {workspace && (
+              <TeamSettings
+                workspace={workspace}
+                members={teamMembers}
+                invitations={teamInvitations}
+                canManage={canManageTeam}
+                busy={teamBusy}
+                inviteEmail={inviteEmail}
+                inviteRole={inviteRole}
+                onInviteEmailChange={setInviteEmail}
+                onInviteRoleChange={setInviteRole}
+                onSubmitInvitation={submitInvitation}
+                onRevokeInvitation={revokeInvitation}
+                onChangeMemberRole={changeMemberRole}
+                onDeleteMember={deleteMember}
+                onRefresh={refreshTeam}
+              />
+            )}
           </section>
         )}
       </main>
     </div>
+  );
+}
+
+function AuthScreen({
+  mode,
+  email,
+  password,
+  busy,
+  message,
+  onModeChange,
+  onEmailChange,
+  onPasswordChange,
+  onSubmit,
+  onGoogleAuth,
+  onPasswordSetup,
+}: {
+  mode: AuthMode;
+  email: string;
+  password: string;
+  busy: boolean;
+  message: string;
+  onModeChange: (mode: AuthMode) => void;
+  onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onGoogleAuth: () => void;
+  onPasswordSetup: () => void;
+}) {
+  return (
+    <main className="authPage">
+      <form className="authPanel" onSubmit={onSubmit}>
+        <div className="brandMark authBrand">
+          <div className="logo">DV</div>
+          <div>
+            <strong>Devix</strong>
+            <span>Acces securise</span>
+          </div>
+        </div>
+        <div className="segmented authMode">
+          <button type="button" className={mode === "signin" ? "active" : ""} onClick={() => onModeChange("signin")}>Connexion</button>
+          <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => onModeChange("signup")}>Compte</button>
+        </div>
+        <button className="googleAuthButton" type="button" disabled={busy} onClick={onGoogleAuth}>
+          <span>G</span>
+          Continuer avec Google
+        </button>
+        <div className="authDivider"><span>ou</span></div>
+        <label>Email<input type="email" autoComplete="email" value={email} onChange={(event) => onEmailChange(event.target.value)} /></label>
+        <label>Mot de passe<input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(event) => onPasswordChange(event.target.value)} /></label>
+        {message && <span className="authMessage">{message}</span>}
+        <button type="submit" disabled={busy}>
+          {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
+          {mode === "signin" ? "Se connecter" : "Creer le compte"}
+        </button>
+        <button className="ghost passwordLinkButton" type="button" disabled={busy} onClick={onPasswordSetup}>
+          Definir / reinitialiser le mot de passe
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function AccountPasswordSettings({
+  email,
+  password,
+  confirmPassword,
+  busy,
+  onPasswordChange,
+  onConfirmPasswordChange,
+  onSubmit,
+}: {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  busy: boolean;
+  onPasswordChange: (value: string) => void;
+  onConfirmPasswordChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <section className="accountSection">
+      <div className="panelTitle accountTitle">
+        <div>
+          <span className="eyebrow">Compte</span>
+          <h3>Mot de passe</h3>
+        </div>
+        <span className="accountEmail">{email}</span>
+      </div>
+      <form className="accountPasswordForm" onSubmit={onSubmit}>
+        <label>Nouveau mot de passe<input type="password" autoComplete="new-password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="8 caracteres minimum" /></label>
+        <label>Confirmation<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => onConfirmPasswordChange(event.target.value)} placeholder="Repeter le mot de passe" /></label>
+        <button type="submit" disabled={busy || !password || !confirmPassword}>
+          {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
+          Enregistrer
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function TeamSettings({
+  workspace,
+  members,
+  invitations,
+  canManage,
+  busy,
+  inviteEmail,
+  inviteRole,
+  onInviteEmailChange,
+  onInviteRoleChange,
+  onSubmitInvitation,
+  onRevokeInvitation,
+  onChangeMemberRole,
+  onDeleteMember,
+  onRefresh,
+}: {
+  workspace: WorkspaceContext;
+  members: TeamMember[];
+  invitations: TeamInvitation[];
+  canManage: boolean;
+  busy: boolean;
+  inviteEmail: string;
+  inviteRole: InviteRole;
+  onInviteEmailChange: (value: string) => void;
+  onInviteRoleChange: (value: InviteRole) => void;
+  onSubmitInvitation: (event: FormEvent<HTMLFormElement>) => void;
+  onRevokeInvitation: (invitation: TeamInvitation) => void;
+  onChangeMemberRole: (member: TeamMember, role: InviteRole) => void;
+  onDeleteMember: (member: TeamMember) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="teamSection">
+      <div className="panelTitle teamTitle">
+        <div>
+          <span className="eyebrow">Equipe</span>
+          <h3>Employes et acces</h3>
+        </div>
+        <button className="ghost subtleButton" disabled={busy} onClick={onRefresh} type="button">
+          {busy ? <LoaderCircle className="spinIcon" size={15} /> : <Users size={15} />}
+          Actualiser
+        </button>
+      </div>
+
+      {canManage && (
+        <form className="inviteForm" onSubmit={onSubmitInvitation}>
+          <label>Email employe<input type="email" value={inviteEmail} onChange={(event) => onInviteEmailChange(event.target.value)} placeholder="prenom@societe.fr" /></label>
+          <label>Droits<select value={inviteRole} onChange={(event) => onInviteRoleChange(event.target.value as InviteRole)}>
+            {inviteRoleOptions.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
+          </select></label>
+          <button type="submit" disabled={busy || !inviteEmail.trim()}><UserPlus size={17} /> Inviter</button>
+        </form>
+      )}
+
+      <div className="teamLayout">
+        <div className="teamColumn">
+          <div className="teamColumnHeader">
+            <strong>Membres</strong>
+            <span>{members.length}</span>
+          </div>
+          <div className="teamRows">
+            {members.map((member) => {
+              const locked = !canManage || member.role === "owner" || member.isCurrentUser;
+              return (
+                <div className="teamRow" key={member.id}>
+                  <div>
+                    <strong>{member.email || "Email indisponible"}</strong>
+                    <span>{member.isCurrentUser ? "Vous" : `Ajoute le ${formatShortDate(member.createdAt)}`}</span>
+                  </div>
+                  {member.role === "owner" ? (
+                    <span className="statusBadge success">{roleLabels.owner}</span>
+                  ) : (
+                    <select disabled={locked || busy} value={member.role} onChange={(event) => onChangeMemberRole(member, event.target.value as InviteRole)}>
+                      {inviteRoleOptions.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
+                    </select>
+                  )}
+                  {canManage && (
+                    <button className="iconButton dangerIcon" disabled={locked || busy} onClick={() => onDeleteMember(member)} title="Retirer l'employe" type="button">
+                      <Trash2 size={17} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {!members.length && <div className="emptyRows compactEmpty">Aucun membre charge.</div>}
+          </div>
+        </div>
+
+        {canManage && (
+          <div className="teamColumn">
+            <div className="teamColumnHeader">
+              <strong>Invitations</strong>
+              <span>{invitations.length}</span>
+            </div>
+            <div className="teamRows">
+              {invitations.map((invitation) => (
+                <div className="teamRow invitationRow" key={invitation.id}>
+                  <div>
+                    <strong>{invitation.email}</strong>
+                    <span>{roleLabels[invitation.role]} · expire le {formatShortDate(invitation.expiresAt)}</span>
+                  </div>
+                  <span className="statusBadge info">Email envoye</span>
+                  <button className="iconButton dangerIcon" disabled={busy} onClick={() => onRevokeInvitation(invitation)} title="Supprimer l'invitation" type="button">
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              ))}
+              {!invitations.length && <div className="emptyRows compactEmpty">Aucune invitation en attente.</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <span className="teamFootnote">{workspace.organizationName} · {roleLabels[workspace.role]}</span>
+    </section>
   );
 }
 
@@ -999,25 +1572,6 @@ function DocumentEditor({
         ))}
       </div>
 
-      <section className="attachmentsPanel">
-        <div className="panelTitle">
-          <h3><Paperclip size={18} /> Pièces jointes</h3>
-          <button className="ghost" onClick={() => onAddAttachment(doc)}><Paperclip size={17} /> Ajouter</button>
-        </div>
-        <div className="attachmentList">
-          {doc.attachments.length ? doc.attachments.map((attachment) => (
-            <div className="attachmentRow" key={attachment.id}>
-              <div>
-                <strong>{attachment.name}</strong>
-                <span>{fileSizeLabel(attachment.size)} - ajoute le {formatShortDate(attachment.addedAt)}</span>
-              </div>
-              <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la pièce jointe"><ExternalLink size={16} /></button>
-              <button className="iconButton dangerIcon" onClick={() => onRemoveAttachment(doc, attachment)} title="Supprimer la pièce jointe"><Trash2 size={16} /></button>
-            </div>
-          )) : <div className="emptyRows compactEmpty">Aucune pièce jointe ajoutée.</div>}
-        </div>
-      </section>
-
       <div className="bottomEditor">
         <label>Note document<textarea placeholder="Informations affichees sur ce document" value={doc.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
         <label>Conditions<textarea placeholder="Conditions propres a ce document" value={doc.terms} onChange={(event) => patch({ terms: event.target.value })} /></label>
@@ -1028,6 +1582,35 @@ function DocumentEditor({
           <div><span>Acompte</span><strong>{currency(sums.totalTtc * (doc.depositRate / 100))}</strong></div>
         </div>
       </div>
+
+      <section className="attachmentsPanel" aria-label="Pieces jointes">
+        <div className="attachmentsSummary">
+          <div className="attachmentsTitle">
+            <Paperclip size={15} />
+            <div>
+              <h3>Documents associes</h3>
+              <span>{doc.attachments.length ? `${doc.attachments.length} piece(s) jointe(s)` : "Aucune piece jointe"}</span>
+            </div>
+          </div>
+          <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une piece jointe">
+            <Paperclip size={16} /> Ajouter
+          </button>
+        </div>
+        {doc.attachments.length > 0 && (
+          <div className="attachmentList">
+            {doc.attachments.map((attachment) => (
+              <div className="attachmentRow" key={attachment.id}>
+                <div>
+                  <strong>{attachment.name}</strong>
+                  <span>{fileSizeLabel(attachment.size)} - ajoute le {formatShortDate(attachment.addedAt)}</span>
+                </div>
+                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la piece jointe"><ExternalLink size={16} /></button>
+                <button className="iconButton dangerIcon" onClick={() => onRemoveAttachment(doc, attachment)} title="Supprimer la piece jointe"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
       <DocumentPreview doc={doc} client={client} sums={sums} />
     </article>
   );

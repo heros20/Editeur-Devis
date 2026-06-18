@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "PORTABLE=%~dp0release\L'Atelier du Bois 1.0.1.exe"
+set "PORTABLE=%~dp0release\Devix 1.0.1.exe"
 
 if exist "%PORTABLE%" (
   start "" "%PORTABLE%"
@@ -15,7 +15,7 @@ if exist "%~dp0node_modules\.bin\electron.cmd" (
 )
 
 echo.
-echo L'Atelier du Bois ne peut pas demarrer.
+echo Devix ne peut pas demarrer.
 echo.
 echo Solution:
 echo 1. npm install

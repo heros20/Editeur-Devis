@@ -6,11 +6,18 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
 const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
+const appProtocol = "atelier";
 let mainWindow;
+let pendingDeepLinkUrl = process.argv.find((arg) => arg.startsWith(`${appProtocol}://`)) || "";
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: "atelier",
+    scheme: appProtocol,
     privileges: {
       standard: true,
       secure: true,
@@ -22,23 +29,23 @@ protocol.registerSchemesAsPrivileged([
 
 const defaultData = {
   company: {
-    name: "L'Atelier du Bois",
-    legalName: "L'Atelier du Bois",
+    name: "",
+    legalName: "",
     siret: "",
     vatNumber: "",
-    address: "12 rue des Copeaux",
-    postalCode: "75000",
-    city: "Paris",
-    phone: "01 23 45 67 89",
-    email: "contact@atelier-du-bois.fr",
+    address: "",
+    postalCode: "",
+    city: "",
+    phone: "",
+    email: "",
     website: "",
     iban: "",
     bic: "",
-    paymentTerms: "30% d'acompte à la commande, solde à réception des travaux.",
+    paymentTerms: "",
     quoteValidityDays: 30,
     defaultVatRate: 20,
     defaultDepositRate: 30,
-    notes: "Fabrication sur mesure en atelier, pose comprise selon descriptif.",
+    notes: "",
   },
   counters: {
     quote: 1,
@@ -58,7 +65,7 @@ const defaultData = {
   ],
 };
 
-defaultData.company.paymentTerms = "30% d'acompte à la commande, solde à réception des travaux.";
+defaultData.company.paymentTerms = "";
 defaultData.catalog = defaultData.catalog.map((item) => {
   if (item.id === "cat-2") return { ...item, name: "Placard / dressing mélaminé" };
   if (item.id === "cat-3") return { ...item, name: "Bibliothèque chêne plaqué" };
@@ -89,6 +96,22 @@ function getAttachmentsDir(documentId) {
 
 function safeAttachmentName(fileName) {
   return path.basename(fileName || "piece-jointe").replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-");
+}
+
+function mimeFromFileName(fileName) {
+  const extension = path.extname(fileName || "").toLowerCase();
+  const types = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".txt": "text/plain",
+  };
+  return types[extension] || "application/octet-stream";
 }
 
 function backupTimestamp() {
@@ -141,7 +164,7 @@ async function writeBackupSet(root, data, makeSnapshot) {
 async function getOneDriveBackupRoot() {
   for (const candidate of getOneDriveCandidates()) {
     if (await pathExists(candidate)) {
-      return path.join(candidate, "Atelier du Bois", "Sauvegardes");
+      return path.join(candidate, "Devix", "Sauvegardes");
     }
   }
   return "";
@@ -208,6 +231,28 @@ function makeNumber(prefix, count) {
   return `${prefix}-${year}-${String(count).padStart(4, "0")}`;
 }
 
+function isAppDeepLink(value) {
+  return typeof value === "string" && value.startsWith(`${appProtocol}://`);
+}
+
+function loadAppUrl(targetUrl = "") {
+  if (!mainWindow) return;
+  if (isDev) {
+    mainWindow.loadURL("http://127.0.0.1:5173");
+    return;
+  }
+  mainWindow.loadURL(isAppDeepLink(targetUrl) ? targetUrl : `${appProtocol}://app/index.html`);
+}
+
+function openDeepLink(targetUrl) {
+  if (!isAppDeepLink(targetUrl)) return;
+  pendingDeepLinkUrl = targetUrl;
+  if (!mainWindow) return;
+  loadAppUrl(targetUrl);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null);
 
@@ -216,7 +261,7 @@ function createWindow() {
     height: 940,
     minWidth: 1120,
     minHeight: 740,
-    title: "L'Atelier du Bois",
+    title: "Devix",
     backgroundColor: "#f6f3ee",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -231,22 +276,23 @@ function createWindow() {
         responseHeaders: {
           ...details.responseHeaders,
           "Content-Security-Policy": [
-            "default-src 'self' atelier:; script-src 'self' atelier:; style-src 'self' atelier:; img-src 'self' atelier: data: blob:; font-src 'self' atelier: data:; connect-src 'self' atelier:;",
+            "default-src 'self' atelier:; script-src 'self' atelier:; style-src 'self' atelier:; img-src 'self' atelier: data: blob: https:; font-src 'self' atelier: data:; connect-src 'self' atelier: https://srfaeqhepmogxsdiympq.supabase.co https://*.supabase.co wss://srfaeqhepmogxsdiympq.supabase.co wss://*.supabase.co;",
           ],
         },
       });
     });
   }
 
-  if (isDev) {
-    mainWindow.loadURL("http://127.0.0.1:5173");
-  } else {
-    mainWindow.loadURL("atelier://app/index.html");
-  }
+  loadAppUrl(pendingDeepLinkUrl);
+  pendingDeepLinkUrl = "";
 }
 
 app.whenReady().then(() => {
-  protocol.handle("atelier", (request) => {
+  if (!isDev) {
+    app.setAsDefaultProtocolClient(appProtocol);
+  }
+
+  protocol.handle(appProtocol, (request) => {
     const url = new URL(request.url);
     const relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, "")) || "index.html";
     const filePath = path.join(__dirname, "../dist", relativePath);
@@ -254,6 +300,17 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+});
+
+app.on("second-instance", (_event, commandLine) => {
+  const targetUrl = commandLine.find(isAppDeepLink);
+  if (targetUrl) openDeepLink(targetUrl);
+  else if (mainWindow) mainWindow.focus();
+});
+
+app.on("open-url", (event, targetUrl) => {
+  event.preventDefault();
+  openDeepLink(targetUrl);
 });
 
 app.on("window-all-closed", () => {
@@ -420,7 +477,7 @@ ipcMain.handle("app:email-pdf", async (_event, { html, defaultPath, to, subject,
 ipcMain.handle("dialog:export-json", async (_event, data) => {
   const target = await dialog.showSaveDialog(mainWindow, {
     title: "Sauvegarder les donnees",
-    defaultPath: "atelier-du-bois-sauvegarde.json",
+    defaultPath: "devix-sauvegarde.json",
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
   if (target.canceled || !target.filePath) return { canceled: true };
@@ -450,10 +507,14 @@ ipcMain.handle("dialog:select-attachments", async (_event, documentId) => {
     const storedName = `${id}-${safeAttachmentName(originalName)}`;
     const filePath = path.join(targetDir, storedName);
     await fs.copyFile(sourcePath, filePath);
+    const buffer = await fs.readFile(sourcePath);
+    const mimeType = mimeFromFileName(originalName);
     attachments.push({
       id,
       name: originalName,
       filePath,
+      dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
+      mimeType,
       size: stat.size,
       addedAt: new Date().toISOString(),
     });

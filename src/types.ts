@@ -51,6 +51,9 @@ export interface DocumentAttachment {
   id: string;
   name: string;
   filePath: string;
+  storagePath?: string;
+  mimeType?: string;
+  dataUrl?: string;
   size: number;
   addedAt: string;
 }

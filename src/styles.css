@@ -177,12 +177,104 @@ button:disabled {
   font-weight: 800;
 }
 .notice.warning { color: #8a5d11; }
+.workspaceBadge {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #d9ded8;
+  border-radius: 999px;
+  background: #f8faf7;
+  color: #40534d;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
 .contextLine {
   display: block;
   margin-top: 5px;
   color: #65746f;
   font-size: 13px;
   font-weight: 700;
+}
+
+.authPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f5f6f2;
+}
+
+.authPanel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  background: white;
+  border: 1px solid #e2d9ce;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(47, 34, 24, 0.08);
+}
+
+.authBrand {
+  margin-bottom: 4px;
+  color: #20332f;
+}
+
+.authBrand span {
+  color: #69786f;
+}
+
+.authMode {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.authMessage {
+  display: block;
+  color: #8a5d11;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.googleAuthButton {
+  min-height: 40px;
+  background: white;
+  color: #20332f;
+  border: 1px solid #d9ded8;
+}
+
+.googleAuthButton span {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #f3f5f7;
+  color: #1a73e8;
+  font-weight: 900;
+}
+
+.authDivider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8a8178;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.authDivider::before,
+.authDivider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #e2d9ce;
+}
+
+.passwordLinkButton {
+  min-height: 34px;
+  font-size: 12px;
 }
 
 .dashboard {
@@ -557,27 +649,70 @@ textarea {
 }
 
 .attachmentsPanel {
-  margin-top: 18px;
-  padding: 14px;
-  border: 1px solid #e2d9ce;
-  border-radius: 8px;
-  background: #fbfaf8;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e8e1d8;
+  border-radius: 6px;
+  background: #f8f7f4;
+}
+
+.attachmentsSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attachmentsTitle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #6f665d;
+}
+
+.attachmentsTitle svg {
+  flex: 0 0 auto;
+  color: #8d8379;
+}
+
+.attachmentsTitle h3 {
+  margin: 0;
+  color: #514940;
+  font-size: 13px;
+}
+
+.attachmentsTitle span {
+  display: block;
+  margin-top: 2px;
+  color: #8a8178;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attachmentAddButton {
+  min-height: 30px;
+  padding: 0 9px;
+  flex: 0 0 auto;
+  color: #514940;
+  font-size: 12px;
 }
 
 .attachmentList {
+  margin-top: 10px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .attachmentRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px 38px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  gap: 6px;
   align-items: center;
-  min-height: 54px;
-  padding: 9px 10px;
-  background: white;
-  border: 1px solid #e5ddd4;
+  min-height: 44px;
+  padding: 7px 8px;
+  background: #fffdfb;
+  border: 1px solid #ebe5df;
   border-radius: 6px;
 }
 
@@ -592,12 +727,27 @@ textarea {
 
 .attachmentRow span {
   margin-top: 3px;
-  color: #71675e;
+  color: #7c736a;
   font-size: 12px;
   font-weight: 700;
 }
 
+.attachmentRow strong {
+  color: #3f3730;
+  font-size: 13px;
+}
+
+.attachmentsPanel .iconButton {
+  min-width: 32px;
+  min-height: 32px;
+  color: #6f6259;
+}
+
 .dangerIcon {
+  color: #9b2f25;
+}
+
+.attachmentsPanel .dangerIcon {
   color: #9b2f25;
 }
 
@@ -861,6 +1011,142 @@ textarea {
   margin-top: 14px;
 }
 
+.accountSection,
+.teamSection {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e8e1d8;
+  display: grid;
+  gap: 12px;
+}
+
+.accountTitle,
+.teamTitle {
+  margin-bottom: 0;
+}
+
+.accountTitle .eyebrow,
+.teamTitle .eyebrow {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.accountTitle h3,
+.teamTitle h3 {
+  margin-top: 0;
+}
+
+.accountEmail {
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.accountPasswordForm {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.inviteForm {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.inviteForm {
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 180px) auto;
+}
+
+.teamLayout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.teamColumn {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.teamColumnHeader {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #20332f;
+}
+
+.teamColumnHeader span,
+.teamFootnote {
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.teamRows {
+  display: grid;
+  gap: 7px;
+}
+
+.teamRow {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 36px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #ebe5df;
+  border-radius: 6px;
+  background: #fbfcfa;
+}
+
+.teamRow > div {
+  min-width: 0;
+}
+
+.teamRow strong,
+.teamRow span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamRow strong {
+  color: #20332f;
+  font-size: 13px;
+}
+
+.teamRow span {
+  margin-top: 3px;
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.teamRow select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #d7cec4;
+  border-radius: 5px;
+  background: white;
+  color: #241b16;
+  padding: 6px 8px;
+}
+
+.invitationRow {
+  grid-template-columns: minmax(0, 1fr) max-content 36px;
+}
+
+.teamFootnote {
+  display: block;
+}
+
 .emptyRows {
   padding: 26px;
   text-align: center;
@@ -945,8 +1231,16 @@ textarea {
   .catalogToolbar,
   .clientsToolbar,
   .clientsLayout,
-  .catalogRow {
+  .catalogRow,
+  .accountPasswordForm,
+  .inviteForm,
+  .teamLayout {
     grid-template-columns: 1fr;
+  }
+
+  .teamRow,
+  .invitationRow {
+    grid-template-columns: minmax(0, 1fr) max-content 36px;
   }
 
   nav button.nested {
