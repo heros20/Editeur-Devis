@@ -598,7 +598,7 @@ textarea {
 
 .lineHead, .lineRow {
   display: grid;
-  grid-template-columns: minmax(260px, 1.9fr) 70px 70px 95px 70px 70px 110px 42px;
+  grid-template-columns: minmax(240px, 1.8fr) 68px 68px 92px 78px 68px 104px 104px 42px;
   gap: 0;
   align-items: stretch;
 }
@@ -626,6 +626,46 @@ textarea {
   width: 100%;
 }
 
+.suffixInput {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.suffixInput input {
+  padding-right: 25px;
+}
+
+.suffixInput > span {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #71665d;
+  font-size: 12px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.lineRow > .suffixInput {
+  border-right: 1px solid #ece5dd;
+  align-self: start;
+}
+
+.lineRow > .suffixInput input {
+  border-right: 0;
+  min-height: 42px;
+  text-align: right;
+}
+
+.lineRow > .suffixInput > span {
+  top: 21px;
+}
+
+.formSuffix input {
+  min-height: 40px;
+}
+
 .lineRow textarea {
   min-height: 48px;
   border-top: 1px solid #f0e9e2;
@@ -639,6 +679,75 @@ textarea {
   justify-content: flex-end;
   padding: 8px;
   border-right: 1px solid #ece5dd;
+}
+
+.marginValue {
+  flex-direction: column;
+  gap: 2px;
+  color: #276046;
+}
+
+.marginValue span,
+.marginValue em {
+  display: block;
+  font-style: normal;
+  line-height: 1.1;
+}
+
+.marginValue em {
+  color: #5f716b;
+  font-size: 11px;
+}
+
+.marginValue.negative {
+  color: #9b2f25;
+}
+
+.marginHelperShell {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid #f0e9e2;
+  background: #fbfcfa;
+}
+
+.marginHelpButton {
+  justify-self: start;
+}
+
+.marginHelper {
+  display: grid;
+  gap: 6px;
+}
+
+.marginHelper label {
+  display: grid;
+  grid-template-columns: 84px 74px;
+  align-items: center;
+  gap: 8px;
+  color: #695e55;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.marginHelper .compactSuffix input {
+  min-height: 32px;
+  border: 1px solid #d7cec4;
+  border-radius: 5px;
+  padding: 5px 23px 5px 7px;
+}
+
+.marginHelper > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.marginHelper span {
+  color: #756b62;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .iconButton {
@@ -815,7 +924,7 @@ textarea {
 .catalogPanel {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 14px;
 }
 
@@ -835,13 +944,133 @@ textarea {
 
 .catalogRow {
   display: grid;
-  grid-template-columns: minmax(220px, 1.3fr) minmax(160px, 1fr) 90px 110px 90px 42px;
-  gap: 10px;
-  align-items: end;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(360px, 1fr);
+  gap: 14px;
+  align-items: start;
   padding: 12px;
   background: white;
   border: 1px solid #e2d9ce;
   border-radius: 8px;
+}
+
+.stockSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.stockSummary div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2d9ce;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.stockSummary span,
+.stockHistory span {
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.catalogMain,
+.stockBlock {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.catalogRowHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content 38px;
+  gap: 10px;
+  align-items: center;
+}
+
+.catalogRowHeader div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.catalogRowHeader strong,
+.catalogRowHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalogRowHeader span {
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.catalogFields,
+.stockFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.stockToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stockToggle input {
+  width: auto;
+  min-height: auto;
+}
+
+.stockUnitReadout {
+  display: grid;
+  gap: 6px;
+  color: #695e55;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stockUnitReadout strong {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #e2d9ce;
+  border-radius: 5px;
+  background: #f8faf7;
+  color: #20332f;
+}
+
+.stockMovementToggle {
+  justify-self: start;
+}
+
+.stockMovementPanel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed #ded5cb;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.stockMovement {
+  display: grid;
+  grid-template-columns: 80px minmax(130px, 1fr) repeat(3, max-content);
+  gap: 8px;
+  align-items: end;
+}
+
+.stockHistory {
+  display: grid;
+  gap: 4px;
+  padding-top: 2px;
 }
 
 .previewHeader,
@@ -1036,10 +1265,21 @@ textarea {
   margin-top: 0;
 }
 
+.accountActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
 .accountEmail {
   color: #756b62;
   font-size: 12px;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .accountPasswordForm {
@@ -1047,6 +1287,43 @@ textarea {
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
   gap: 10px;
   align-items: end;
+}
+
+.accountDangerZone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #e3d8ce;
+}
+
+.accountDangerZone div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.accountDangerZone strong {
+  color: #4a2b27;
+  font-size: 13px;
+}
+
+.accountDangerZone span {
+  color: #806f66;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.accountDeleteConfirm {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dangerTextButton {
+  color: #8d3129;
 }
 
 .inviteForm {
@@ -1165,7 +1442,14 @@ textarea {
   .bottomEditor { grid-template-columns: 1fr; }
   .rows button { grid-template-columns: 90px 110px minmax(120px, 1fr) 110px 94px 18px; }
   .catalogRow {
-    grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 1fr) 80px 100px 80px 42px;
+    grid-template-columns: 1fr;
+  }
+  .catalogFields,
+  .stockFields {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+  .stockMovement {
+    grid-template-columns: 90px minmax(160px, 1fr) repeat(3, max-content);
   }
 }
 
@@ -1232,6 +1516,10 @@ textarea {
   .clientsToolbar,
   .clientsLayout,
   .catalogRow,
+  .catalogFields,
+  .stockFields,
+  .stockSummary,
+  .stockMovement,
   .accountPasswordForm,
   .inviteForm,
   .teamLayout {
@@ -1257,7 +1545,7 @@ textarea {
 
   .lineHead,
   .lineRow {
-    min-width: 830px;
+    min-width: 960px;
   }
 
   .rows button {

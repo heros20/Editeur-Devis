@@ -84,7 +84,6 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <div class="box">
           <h3>Client</h3>
           <p><strong>${esc(client?.name)}</strong></p>
-          <p>${esc(client?.contact)}</p>
           <p>${esc(client?.address)}</p>
           <p>${esc(client?.postalCode)} ${esc(client?.city)}</p>
           <p>${esc(client?.email)} ${client?.phone ? `- ${esc(client.phone)}` : ""}</p>
@@ -102,7 +101,7 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <p>${esc(doc.notes)}</p>
       </section>
       <table>
-        <thead><tr><th>Désignation</th><th>Unité</th><th class="num">Qté</th><th class="num">PU HT</th><th class="num">Rem.</th><th class="num">TVA</th><th class="num">Total HT</th></tr></thead>
+        <thead><tr><th>Désignation</th><th>Unité</th><th class="num">Qté</th><th class="num">PU HT</th><th class="num">Remise</th><th class="num">TVA</th><th class="num">Total HT</th></tr></thead>
         <tbody>${lines}</tbody>
       </table>
       <section class="totals">

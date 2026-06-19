@@ -1,4 +1,4 @@
-export type DocumentType = "quote" | "order" | "invoice";
+export type DocumentType = "quote" | "order" | "invoice" | "creditNote" | "returnInvoice";
 export type DocumentStatus = "draft" | "paid";
 
 export interface CompanySettings {
@@ -38,11 +38,13 @@ export interface Client {
 
 export interface LineItem {
   id: string;
+  catalogItemId?: string;
   description: string;
   details: string;
   unit: string;
   quantity: number;
   unitPrice: number;
+  purchasePrice: number;
   vatRate: number;
   discount: number;
 }
@@ -116,8 +118,26 @@ export interface CatalogItem {
   name: string;
   unit: string;
   price: number;
+  purchasePrice: number;
   vatRate: number;
   category: string;
+  trackStock: boolean;
+  stockQuantity: number;
+  stockMinimum: number;
+  stockUnit: string;
+  supplier: string;
+  location: string;
+  stockMovements: StockMovement[];
+}
+
+export interface StockMovement {
+  id: string;
+  type: "entry" | "exit" | "adjustment";
+  quantity: number;
+  previousQuantity: number;
+  nextQuantity: number;
+  reason: string;
+  createdAt: string;
 }
 
 export interface AppData {

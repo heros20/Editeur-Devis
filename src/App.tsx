@@ -31,6 +31,7 @@ import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { getAtelierApi } from "./runtimeApi";
 import {
   createTeamInvitation,
+  deleteCurrentAccount,
   deleteRemoteAttachment,
   deleteTeamInvitation,
   getCurrentSession,
@@ -63,10 +64,12 @@ import type {
   Client,
   CompanySettings,
   DocumentAttachment,
+  DocumentHistoryEntry,
   DocumentSnapshot,
   DocumentStatus,
   DocumentType,
   LineItem,
+  StockMovement,
 } from "./types";
 import {
   addDaysIso,
@@ -75,6 +78,7 @@ import {
   duplicateLines,
   formatBusinessNumber,
   labels,
+  lineMargin,
   makeId,
   sanitizeFileName,
   statusLabels,
@@ -87,9 +91,9 @@ type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients"
 type AuthMode = "signin" | "signup";
 
 const roleLabels: Record<WorkspaceRole, string> = {
-  owner: "Proprietaire",
+  owner: "Propriétaire",
   admin: "Admin",
-  editor: "Edition",
+  editor: "Édition",
   viewer: "Lecture",
 };
 
@@ -102,13 +106,19 @@ function normalizeSearch(value = "") {
     .toLowerCase();
 }
 
+function formatPhoneNumber(value = "") {
+  return value
+    .replace(/\D/g, "")
+    .slice(0, 10)
+    .replace(/(\d{2})(?=\d)/g, "$1 ");
+}
+
 function clientSearchText(client: Client) {
   return normalizeSearch(
     [
       client.number,
       client.type,
       client.name,
-      client.contact,
       client.email,
       client.phone,
       client.address,
@@ -135,6 +145,15 @@ function fileSizeLabel(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
+function requiredDiscountForMargin(line: LineItem, targetMargin: number) {
+  const gross = (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0);
+  const purchaseTotal = (Number(line.quantity) || 0) * (Number(line.purchasePrice) || 0);
+  const targetRate = targetMargin / 100;
+  if (!gross || !purchaseTotal || targetRate >= 1) return null;
+  const requiredTotal = purchaseTotal / (1 - targetRate);
+  return (1 - requiredTotal / gross) * 100;
+}
+
 const emptyLine = (vatRate = 20): LineItem => ({
   id: makeId("line"),
   description: "",
@@ -142,6 +161,7 @@ const emptyLine = (vatRate = 20): LineItem => ({
   unit: "",
   quantity: 1,
   unitPrice: 0,
+  purchasePrice: 0,
   vatRate,
   discount: 0,
 });
@@ -151,8 +171,16 @@ const emptyCatalogItem = (vatRate = 20): CatalogItem => ({
   name: "",
   unit: "",
   price: 0,
+  purchasePrice: 0,
   vatRate,
   category: "",
+  trackStock: false,
+  stockQuantity: 0,
+  stockMinimum: 0,
+  stockUnit: "",
+  supplier: "",
+  location: "",
+  stockMovements: [],
 });
 
 export function App() {
@@ -214,11 +242,11 @@ export function App() {
         setData(normalizeData(remote.data));
         setLoadError("");
       } catch (error) {
-        console.error("Impossible de charger les donnees", error);
+        console.error("Impossible de charger les données", error);
         if (!active) return;
         setWorkspace(null);
         setData(createDefaultAppData());
-        setLoadError("Impossible de charger vos donnees. Reessayez dans quelques instants.");
+        setLoadError("Impossible de charger vos données. Réessayez dans quelques instants.");
       } finally {
         if (active) setLoaded(true);
       }
@@ -231,7 +259,7 @@ export function App() {
         if (!active) return;
         setSession(null);
         setLoaded(true);
-        setLoadError("Connexion impossible. Verifiez votre acces internet.");
+        setLoadError("Connexion impossible. Vérifiez votre accès internet.");
       });
 
     const unsubscribe = onRemoteAuthStateChange((nextSession) => {
@@ -245,7 +273,11 @@ export function App() {
     };
   }, []);
 
-  async function persist(next: AppData, message = "Enregistre") {
+  async function persist(next: AppData, message = "Enregistré") {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
     const normalized = normalizeData(next);
     setData(normalized);
     try {
@@ -257,7 +289,7 @@ export function App() {
       }
       setNotice(message);
     } catch (error) {
-      console.error("Impossible d'enregistrer les donnees", error);
+      console.error("Impossible d'enregistrer les données", error);
       setNotice("Sauvegarde indisponible");
     }
     window.setTimeout(() => setNotice(""), 1800);
@@ -269,7 +301,7 @@ export function App() {
       try {
         count = await reserveRemoteCounter(workspace, type);
       } catch (error) {
-        console.warn("Numerotation distante indisponible, compteur local utilise", error);
+        console.warn("Numérotation distante indisponible, compteur local utilisé", error);
       }
     }
     const number = formatBusinessNumber(type, count);
@@ -285,7 +317,7 @@ export function App() {
     };
   }
 
-  function buildClient(number: string, name = "Client a renseigner"): Client {
+  function buildClient(number: string, name = "Client à renseigner"): Client {
     return {
       id: makeId("client"),
       number,
@@ -335,19 +367,93 @@ export function App() {
     };
   }
 
+  function attachmentKey(attachment: DocumentAttachment) {
+    return attachment.storagePath || attachment.filePath || attachment.id;
+  }
+
+  function restoreDocumentFromHistory(doc: BusinessDocument, entry: DocumentHistoryEntry): BusinessDocument {
+    return {
+      id: doc.id,
+      originId: doc.originId,
+      ...entry.snapshot,
+      lines: duplicateLines(entry.snapshot.lines),
+      attachments: [...(entry.snapshot.attachments || [])],
+      history: doc.history.slice(0, -1),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async function deleteAttachmentsExcept(doc: BusinessDocument, preservedAttachments: DocumentAttachment[]) {
+    const preserved = new Set(preservedAttachments.map(attachmentKey));
+    await Promise.all(
+      (doc.attachments || [])
+        .filter((attachment) => !preserved.has(attachmentKey(attachment)))
+        .map((attachment) =>
+          workspace
+            ? deleteRemoteAttachment(attachment).catch(() => undefined)
+            : api.deleteAttachment(attachment).catch(() => ({ deleted: false }))
+        )
+    );
+  }
+
+  function creditLines(lines: LineItem[]) {
+    return duplicateLines(lines).map((line) => ({
+      ...line,
+      unitPrice: -Math.abs(Number(line.unitPrice) || 0),
+    }));
+  }
+
+  function applyDocumentStockImpact(catalog: CatalogItem[], doc: BusinessDocument, mode: "invoice" | "cancelInvoice" | "return" | "cancelReturn") {
+    const multiplier = mode === "invoice" || mode === "cancelReturn" ? -1 : 1;
+    const reasonLabels: Record<typeof mode, string> = {
+      invoice: `Facturation ${doc.number}`,
+      cancelInvoice: `Annulation facturation ${doc.number}`,
+      return: `Retour ${doc.number}`,
+      cancelReturn: `Annulation retour ${doc.number}`,
+    };
+    const movementType: StockMovement["type"] = multiplier < 0 ? "exit" : "entry";
+
+    return catalog.map((item) => {
+      const quantity = doc.lines
+        .filter((line) => line.catalogItemId === item.id)
+        .reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
+      if (!item.trackStock || quantity <= 0) return item;
+
+      const previousQuantity = Number(item.stockQuantity) || 0;
+      const nextQuantity = Math.max(0, previousQuantity + quantity * multiplier);
+      const movement: StockMovement = {
+        id: makeId("stock"),
+        type: movementType,
+        quantity,
+        previousQuantity,
+        nextQuantity,
+        reason: reasonLabels[mode],
+        createdAt: new Date().toISOString(),
+      };
+      return {
+        ...item,
+        stockQuantity: nextQuantity,
+        stockMovements: [
+          movement,
+          ...(item.stockMovements || []),
+        ].slice(0, 30),
+      };
+    });
+  }
+
   function companyText(company: CompanySettings) {
     return [
       company.name,
       company.legalName,
-      `SIRET: ${company.siret || "a renseigner"}`,
-      `TVA: ${company.vatNumber || "a renseigner"}`,
+      `SIRET : ${company.siret || "à renseigner"}`,
+      `TVA : ${company.vatNumber || "à renseigner"}`,
       `${company.address}\n${company.postalCode} ${company.city}`.trim(),
-      `Telephone: ${company.phone}`,
+      `Téléphone : ${company.phone}`,
       `Email: ${company.email}`,
       company.website ? `Site: ${company.website}` : "",
-      `IBAN: ${company.iban || "a renseigner"}`,
-      `BIC: ${company.bic || "a renseigner"}`,
-      `Conditions: ${company.paymentTerms}`,
+      `IBAN : ${company.iban || "à renseigner"}`,
+      `BIC : ${company.bic || "à renseigner"}`,
+      `Conditions : ${company.paymentTerms}`,
     ].filter(Boolean).join("\n");
   }
 
@@ -401,6 +507,35 @@ export function App() {
   const selectedClient = useMemo(() => data.clients.find((client) => client.id === selectedDoc?.clientId), [data.clients, selectedDoc]);
   const selectedClientForEdit = useMemo(() => data.clients.find((client) => client.id === selectedClientId), [data.clients, selectedClientId]);
   const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin";
+  const canManageCompany = !workspace || workspace.role === "owner" || workspace.role === "admin";
+  const canManageCatalog = canManageCompany;
+  const canEditOperations = !workspace || workspace.role === "owner" || workspace.role === "admin" || workspace.role === "editor";
+  const canViewCompanySettings = canManageCompany || workspace?.role === "editor";
+  const canDeleteClients = !workspace || workspace.role === "owner" || workspace.role === "admin";
+
+  function isLockedBillingDocument(doc?: BusinessDocument | null) {
+    return doc?.type === "invoice" || doc?.type === "creditNote" || doc?.type === "returnInvoice";
+  }
+
+  function canModifyDocument(doc?: BusinessDocument | null) {
+    return Boolean(canEditOperations && doc && !isLockedBillingDocument(doc));
+  }
+
+  function canConvertDocument(doc: BusinessDocument, type: DocumentType) {
+    if (!canEditOperations || doc.type === type) return false;
+    if (doc.type === "quote") return type === "order";
+    if (doc.type === "order") return type === "invoice";
+    if (doc.type === "invoice") {
+      if (type === "creditNote") return true;
+      if (type === "returnInvoice") return canManageCatalog;
+    }
+    return false;
+  }
+
+  function showPermissionNotice(message = "Action réservée aux administrateurs.") {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 2200);
+  }
 
   useEffect(() => {
     if (view !== "clients") return;
@@ -412,6 +547,10 @@ export function App() {
       setSelectedClientId(filteredClients[0].id);
     }
   }, [filteredClients, selectedClientId, view]);
+
+  useEffect(() => {
+    if (view === "catalog" && !canManageCatalog) setView("documents");
+  }, [canManageCatalog, view]);
 
   async function refreshTeam() {
     if (!workspace) {
@@ -461,7 +600,7 @@ export function App() {
     try {
       const nextSession = authMode === "signin" ? await signInWithPassword(email, password) : await signUpWithPassword(email, password);
       if (!nextSession) {
-        setAuthMessage("Compte cree. Verifiez votre boite mail pour confirmer l'inscription.");
+        setAuthMessage("Compte créé. Vérifiez votre boîte mail pour confirmer l'inscription.");
       }
     } catch (error) {
       console.error("Connexion impossible", error);
@@ -493,7 +632,7 @@ export function App() {
     setAuthMessage("");
     try {
       await sendPasswordSetupEmail(email);
-      setAuthMessage("Email envoye. Ouvrez le lien recu pour definir votre mot de passe.");
+      setAuthMessage("Email envoyé. Ouvrez le lien reçu pour définir votre mot de passe.");
     } catch (error) {
       console.error("Envoi du lien mot de passe impossible", error);
       setAuthMessage(userFacingError(error, "Envoi du lien impossible."));
@@ -514,10 +653,32 @@ export function App() {
       await updateCurrentUserPassword(accountPassword);
       setAccountPassword("");
       setAccountPasswordConfirm("");
-      setNotice("Mot de passe mis a jour");
+      setNotice("Mot de passe mis à jour");
     } catch (error) {
-      console.error("Mise a jour mot de passe impossible", error);
-      setNotice(userFacingError(error, "Mot de passe impossible a modifier"));
+      console.error("Mise à jour mot de passe impossible", error);
+      setNotice(userFacingError(error, "Mot de passe impossible à modifier"));
+    } finally {
+      setAccountBusy(false);
+      window.setTimeout(() => setNotice(""), 2200);
+    }
+  }
+
+  async function deleteAccount() {
+    setAccountBusy(true);
+    try {
+      await deleteCurrentAccount();
+      setWorkspace(null);
+      setSession(null);
+      setData(createDefaultAppData());
+      setSelectedId("");
+      setTeamMembers([]);
+      setTeamInvitations([]);
+      setInviteEmail("");
+      setView("dashboard");
+      setNotice("Compte supprimé");
+    } catch (error) {
+      console.error("Suppression du compte impossible", error);
+      setNotice(userFacingError(error, "Compte impossible à supprimer"));
     } finally {
       setAccountBusy(false);
       window.setTimeout(() => setNotice(""), 2200);
@@ -536,8 +697,8 @@ export function App() {
       setInviteEmail("");
       setView("dashboard");
     } catch (error) {
-      console.error("Deconnexion impossible", error);
-      setNotice("Deconnexion indisponible");
+      console.error("Déconnexion impossible", error);
+      setNotice("Déconnexion indisponible");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
@@ -549,7 +710,7 @@ export function App() {
     try {
       const invitation = await createTeamInvitation(workspace, inviteEmail, inviteRole);
       setInviteEmail("");
-      setNotice(`Invitation envoyee a ${invitation.email}`);
+      setNotice(`Invitation envoyée à ${invitation.email}`);
       await refreshTeam();
     } catch (error) {
       console.error("Invitation impossible", error);
@@ -566,7 +727,7 @@ export function App() {
     try {
       await deleteTeamInvitation(workspace, invitation.id);
       await refreshTeam();
-      setNotice("Invitation supprimee");
+      setNotice("Invitation supprimée");
     } catch (error) {
       console.error("Suppression invitation impossible", error);
       setNotice(userFacingError(error, "Suppression impossible"));
@@ -582,7 +743,7 @@ export function App() {
     try {
       await updateTeamMemberRole(workspace, member.id, role);
       await refreshTeam();
-      setNotice("Droits mis a jour");
+      setNotice("Droits mis à jour");
     } catch (error) {
       console.error("Modification droits impossible", error);
       setNotice(userFacingError(error, "Modification impossible"));
@@ -598,9 +759,9 @@ export function App() {
     try {
       await removeTeamMember(workspace, member.id);
       await refreshTeam();
-      setNotice("Employe retire");
+      setNotice("Employé retiré");
     } catch (error) {
-      console.error("Retrait employe impossible", error);
+      console.error("Retrait employé impossible", error);
       setNotice(userFacingError(error, "Retrait impossible"));
     } finally {
       setTeamBusy(false);
@@ -642,7 +803,7 @@ export function App() {
     if (view === "documentDetail") return "Document";
     if (view === "catalog") return "Articles et prestations";
     if (view === "clients") return "Fichier clients";
-    return "Parametres societe";
+    return canViewCompanySettings ? "Paramètres société" : "Mon compte";
   }
 
   const filteredDocuments = sortedDocuments
@@ -678,14 +839,22 @@ export function App() {
     .slice(0, 5);
 
   async function createClient() {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
     const reserved = await reserveNumber("client", data);
     const client = buildClient(reserved.number, "Nouveau client");
-    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Client cree");
+    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Client créé");
     setSelectedClientId(client.id);
     setView("clients");
   }
 
   async function createDocument(type: DocumentType = "quote") {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
     const withClient = await ensureClient(data);
     const reserved = await reserveNumber(type, withClient.data);
     const issueDate = todayIso();
@@ -710,13 +879,16 @@ export function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} cree`);
+    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} créé`);
     setSelectedId(doc.id);
     setView("documentDetail");
   }
 
   async function convertDocument(source: BusinessDocument, type: DocumentType) {
-    if (source.type === type) return;
+    if (!canConvertDocument(source, type)) {
+      showPermissionNotice(isLockedBillingDocument(source) ? "Ce document de facturation est verrouillé." : "Votre accès est en lecture seule.");
+      return;
+    }
     const reserved = await reserveNumber(type, data);
     const issueDate = todayIso();
     const transformed: BusinessDocument = {
@@ -726,6 +898,7 @@ export function App() {
       status: "draft",
       issueDate,
       dueDate: addDaysIso(issueDate, 30),
+      lines: type === "creditNote" || type === "returnInvoice" ? creditLines(source.lines) : source.lines,
       history: [
         ...(source.history || []),
         {
@@ -740,14 +913,28 @@ export function App() {
       ],
       updatedAt: new Date().toISOString(),
     };
+    const nextCatalog =
+      type === "invoice"
+        ? applyDocumentStockImpact(reserved.data.catalog, transformed, "invoice")
+        : type === "returnInvoice"
+          ? applyDocumentStockImpact(reserved.data.catalog, transformed, "return")
+          : reserved.data.catalog;
     await persist(
-      { ...reserved.data, documents: reserved.data.documents.map((doc) => (doc.id === source.id ? transformed : doc)) },
+      {
+        ...reserved.data,
+        catalog: nextCatalog,
+        documents: reserved.data.documents.map((doc) => (doc.id === source.id ? transformed : doc)),
+      },
       `${labels[source.type]} transforme en ${labels[type]}`
     );
     setSelectedId(transformed.id);
   }
 
   async function updateDocument(doc: BusinessDocument) {
+    if (!canModifyDocument(doc)) {
+      showPermissionNotice(isLockedBillingDocument(doc) ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le modifier." : "Votre accès est en lecture seule.");
+      return;
+    }
     const updated = { ...doc, updatedAt: new Date().toISOString() };
     await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) });
   }
@@ -757,6 +944,10 @@ export function App() {
   }
 
   async function duplicateDocument(source: BusinessDocument) {
+    if (!canModifyDocument(source)) {
+      showPermissionNotice(isLockedBillingDocument(source) ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le dupliquer." : "Votre accès est en lecture seule.");
+      return;
+    }
     const reserved = await reserveNumber(source.type, data);
     const duplicate: BusinessDocument = {
       ...source,
@@ -775,28 +966,66 @@ export function App() {
     setView("documentDetail");
   }
 
-  async function deleteDocument(doc: BusinessDocument) {
-    await Promise.all(
-      (doc.attachments || []).map((attachment) =>
-        workspace
-          ? deleteRemoteAttachment(attachment).catch(() => undefined)
-          : api.deleteAttachment(attachment).catch(() => ({ deleted: false }))
-      )
+  async function restorePreviousDocument(doc: BusinessDocument) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
+    const lastHistory = doc.history[doc.history.length - 1];
+    if (!lastHistory) return;
+    const restored = restoreDocumentFromHistory(doc, lastHistory);
+    const nextCatalog =
+      doc.type === "invoice"
+        ? applyDocumentStockImpact(data.catalog, doc, "cancelInvoice")
+        : doc.type === "returnInvoice"
+          ? applyDocumentStockImpact(data.catalog, doc, "cancelReturn")
+          : data.catalog;
+    await deleteAttachmentsExcept(doc, restored.attachments);
+    await persist(
+      { ...data, catalog: nextCatalog, documents: data.documents.map((item) => (item.id === doc.id ? restored : item)) },
+      `${labels[lastHistory.fromType]} ${lastHistory.fromNumber} restauré`
     );
+    setSelectedId(restored.id);
+    setView("documentDetail");
+  }
+
+  async function deleteDocument(doc: BusinessDocument) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
+    if (isLockedBillingDocument(doc)) {
+      showPermissionNotice("Ce document de facturation est verrouillé. Revenez au document précédent avant de le supprimer.");
+      return;
+    }
+    const lastHistory = doc.history[doc.history.length - 1];
+    const shouldRestoreOrigin = Boolean(
+      lastHistory && window.confirm(`Voulez-vous régénérer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`)
+    );
+    const restored = shouldRestoreOrigin && lastHistory ? restoreDocumentFromHistory(doc, lastHistory) : null;
+
+    await deleteAttachmentsExcept(doc, restored?.attachments || []);
     const nextDocs = data.documents.filter((item) => item.id !== doc.id);
-    await persist({ ...data, documents: nextDocs }, "Document supprime");
-    setSelectedId("");
-    setView("documents");
+    await persist(
+      { ...data, documents: restored ? [restored, ...nextDocs] : nextDocs },
+      restored ? `${labels[restored.type]} ${restored.number} régénéré` : "Document supprimé"
+    );
+    setSelectedId(restored?.id || "");
+    setView(restored ? "documentDetail" : "documents");
   }
 
   async function addDocumentAttachments(doc: BusinessDocument) {
+    if (!canModifyDocument(doc)) {
+      showPermissionNotice(isLockedBillingDocument(doc) ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes." : "Votre accès est en lecture seule.");
+      return;
+    }
     const result = await api.selectAttachments(doc.id);
     if (result.canceled || !result.attachments.length) return;
     const attachments = workspace
       ? await Promise.all(result.attachments.map((attachment) => uploadRemoteAttachment(workspace, doc.id, attachment)))
       : result.attachments;
     await updateDocument({ ...doc, attachments: [...doc.attachments, ...attachments] });
-    setNotice(`${attachments.length} piece(s) jointe(s) ajoutee(s)`);
+    setNotice(`${attachments.length} pièce(s) jointe(s) ajoutée(s)`);
     window.setTimeout(() => setNotice(""), 1800);
   }
 
@@ -809,13 +1038,17 @@ export function App() {
       const result = await api.openAttachment(attachment);
       if (result.opened) return;
     } catch (error) {
-      console.warn("Ouverture piece jointe impossible", error);
+      console.warn("Ouverture pièce jointe impossible", error);
     }
-    setNotice("Piece jointe introuvable");
+    setNotice("Pièce jointe introuvable");
     window.setTimeout(() => setNotice(""), 2200);
   }
 
   async function removeDocumentAttachment(doc: BusinessDocument, attachment: DocumentAttachment) {
+    if (!canModifyDocument(doc)) {
+      showPermissionNotice(isLockedBillingDocument(doc) ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes." : "Votre accès est en lecture seule.");
+      return;
+    }
     try {
       if (workspace) {
         await deleteRemoteAttachment(attachment);
@@ -823,10 +1056,10 @@ export function App() {
         await api.deleteAttachment(attachment);
       }
     } catch (error) {
-      console.warn("Suppression piece jointe impossible", error);
+      console.warn("Suppression pièce jointe impossible", error);
     } finally {
       await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
-      setNotice("Piece jointe supprimee");
+      setNotice("Pièce jointe supprimée");
       window.setTimeout(() => setNotice(""), 2200);
     }
   }
@@ -842,11 +1075,15 @@ export function App() {
     const client = data.clients.find((item) => item.id === doc.clientId);
     let email = client?.email?.trim() || "";
     if (!email) {
-      const entered = window.prompt("Email du client a ajouter pour cet envoi", email);
+      const entered = window.prompt("Email du client à ajouter pour cet envoi", email);
       if (!entered) return;
       email = entered.trim();
       if (client) {
-        await persist({ ...data, clients: data.clients.map((item) => (item.id === client.id ? { ...item, email } : item)) }, "Email client ajoute");
+        if (!canEditOperations) {
+          showPermissionNotice("Email client absent.");
+          return;
+        }
+        await persist({ ...data, clients: data.clients.map((item) => (item.id === client.id ? { ...item, email } : item)) }, "Email client ajouté");
       }
     }
     const html = renderDocumentHtml(doc, client, data.company);
@@ -863,16 +1100,24 @@ export function App() {
   }
 
   async function updateClient(client: Client) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
     await persist({ ...data, clients: data.clients.map((item) => (item.id === client.id ? client : item)) });
   }
 
   async function deleteClient(client: Client) {
-    const used = data.documents.some((doc) => doc.clientId === client.id);
-    if (used) {
-      setNotice("Client utilise dans un document");
+    if (!canDeleteClients) {
+      showPermissionNotice("Suppression des clients réservée aux administrateurs.");
       return;
     }
-    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprime");
+    const used = data.documents.some((doc) => doc.clientId === client.id);
+    if (used) {
+      setNotice("Client utilisé dans un document");
+      return;
+    }
+    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimé");
     if (selectedClientId === client.id) setSelectedClientId("");
   }
 
@@ -890,31 +1135,45 @@ export function App() {
           unit: item.unit,
           quantity: 1,
           unitPrice: item.price,
+          purchasePrice: item.purchasePrice,
           vatRate: item.vatRate,
           discount: 0,
+          catalogItemId: item.id,
         },
       ],
     });
   }
 
   async function createCatalogItem() {
-    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Article ajoute");
+    if (!canManageCatalog) {
+      showPermissionNotice();
+      return;
+    }
+    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Article ajouté");
     setView("catalog");
   }
 
   async function updateCatalogItem(item: CatalogItem) {
+    if (!canManageCatalog) {
+      showPermissionNotice();
+      return;
+    }
     await persist({ ...data, catalog: data.catalog.map((entry) => (entry.id === item.id ? item : entry)) });
   }
 
   async function deleteCatalogItem(item: CatalogItem) {
-    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Article supprime");
+    if (!canManageCatalog) {
+      showPermissionNotice();
+      return;
+    }
+    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Article supprimé");
   }
 
   async function copyCompany() {
     const text = companyText(data.company);
     try {
       await navigator.clipboard.writeText(text);
-      setNotice("Informations societe copiees");
+      setNotice("Informations société copiées");
     } catch {
       const textarea = document.createElement("textarea");
       textarea.value = text;
@@ -922,14 +1181,14 @@ export function App() {
       textarea.select();
       document.execCommand("copy");
       textarea.remove();
-      setNotice("Informations societe copiees");
+      setNotice("Informations société copiées");
     }
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function emailCompany() {
     await api.openEmail({
-      subject: `Informations societe - ${data.company.name}`,
+      subject: `Informations société - ${data.company.name}`,
       body: companyText(data.company),
     });
   }
@@ -954,14 +1213,14 @@ export function App() {
         <nav>
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><Home size={18} /> Tableau</button>
           <button className={view === "documents" || view === "documentDetail" ? "active" : ""} onClick={() => { setSelectedId(""); setView("documents"); }}><FileText size={18} /> Documents</button>
-          <button className={view === "catalog" ? "active nested" : "nested"} onClick={() => setView("catalog")}><PackageCheck size={18} /> Articles</button>
+          {canManageCatalog && <button className={view === "catalog" ? "active nested" : "nested"} onClick={() => setView("catalog")}><PackageCheck size={18} /> Articles</button>}
           <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Users size={18} /> Clients</button>
-          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Settings size={18} /> Societe</button>
+          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Settings size={18} /> {canViewCompanySettings ? "Société" : "Compte"}</button>
         </nav>
         <div className="quickActions">
-          <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>
-          <button onClick={createClient}><UserPlus size={17} /> Nouveau client</button>
-          <button onClick={createCatalogItem}><PackageCheck size={17} /> Article</button>
+          {canEditOperations && <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>}
+          {canEditOperations && <button onClick={createClient}><UserPlus size={17} /> Nouveau client</button>}
+          {canManageCatalog && <button onClick={createCatalogItem}><PackageCheck size={17} /> Article</button>}
         </div>
       </aside>
 
@@ -977,7 +1236,7 @@ export function App() {
             {loadError && <span className="notice warning"><Check size={16} /> {loadError}</span>}
             {notice && <span className="notice"><Check size={16} /> {notice}</span>}
             {workspace && <span className="workspaceBadge">{workspace.organizationName} · {roleLabels[workspace.role]}</span>}
-            <button className="ghost" onClick={signOut}><LogOut size={17} /> Deconnexion</button>
+            <button className="ghost" onClick={signOut}><LogOut size={17} /> Déconnexion</button>
           </div>
         </header>
 
@@ -986,7 +1245,7 @@ export function App() {
             <div className="kpi"><FileText /><span>Devis en portefeuille</span><strong>{currency(dashboardTotals.quotes)}</strong></div>
             <div className="kpi"><PackageCheck /><span>Commandes</span><strong>{currency(dashboardTotals.orders)}</strong></div>
             <div className="kpi"><ReceiptText /><span>Factures</span><strong>{currency(dashboardTotals.invoices)}</strong></div>
-            <div className="kpi"><FileCheck2 /><span>A encaisser</span><strong>{currency(pendingValue)}</strong></div>
+            <div className="kpi"><FileCheck2 /><span>À encaisser</span><strong>{currency(pendingValue)}</strong></div>
             <div className="panel compact">
               <div className="panelTitle"><h2>Suivi des affaires</h2></div>
               <div className="statusGrid">
@@ -995,13 +1254,13 @@ export function App() {
               </div>
             </div>
             <div className="panel compact">
-              <div className="panelTitle"><h2>Echeances</h2></div>
+              <div className="panelTitle"><h2>Échéances</h2></div>
               <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
             </div>
             <div className="panel wide">
               <div className="panelTitle">
-                <h2>Activite recente</h2>
-                <button onClick={() => createDocument("quote")}><Plus size={17} /> Creer un devis</button>
+                <h2>Activité récente</h2>
+                {canEditOperations && <button onClick={() => createDocument("quote")}><Plus size={17} /> Créer un devis</button>}
               </div>
               <DocumentRows docs={recentDocuments.slice(0, 8)} clients={data.clients} onOpen={openDocument} />
             </div>
@@ -1011,9 +1270,9 @@ export function App() {
         {view === "documents" && (
           <section className="documentLayout">
             <aside className="listPane">
-              <div className="searchBox"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher document, client, societe, ligne..." /></div>
+              <div className="searchBox"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher document, client, société, ligne..." /></div>
               <div className="segmented">
-                {(["all", "quote", "order", "invoice"] as const).map((type) => (
+                {(["all", "quote", "order", "invoice", "creditNote", "returnInvoice"] as const).map((type) => (
                   <button key={type} className={typeFilter === type ? "active" : ""} onClick={() => setTypeFilter(type)}>{type === "all" ? "Tous" : labels[type]}</button>
                 ))}
               </div>
@@ -1039,9 +1298,9 @@ export function App() {
             {!filteredDocuments.length && (
               <div className="emptyState">
                 <FileText size={42} />
-                <h2>{data.documents.length ? "Aucun resultat" : "Aucun document"}</h2>
-                <p>{data.documents.length ? "Aucun devis, bon de commande ou facture ne correspond a cette recherche." : "Creez un premier devis pour demarrer le flux devis, bon de commande, facture."}</p>
-                <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>
+                <h2>{data.documents.length ? "Aucun résultat" : "Aucun document"}</h2>
+                <p>{data.documents.length ? "Aucun devis, bon de commande ou facture ne correspond à cette recherche." : "Créez un premier devis pour démarrer le flux devis, bon de commande, facture."}</p>
+                {canEditOperations && <button onClick={() => createDocument("quote")}><Plus size={17} /> Nouveau devis</button>}
               </div>
             )}
           </section>
@@ -1057,12 +1316,17 @@ export function App() {
                 doc={selectedDoc}
                 clients={sortedClients}
                 catalog={sortedCatalog}
+                readOnly={!canModifyDocument(selectedDoc)}
+                canRestorePrevious={canEditOperations}
+                canCreateCreditNote={canConvertDocument(selectedDoc, "creditNote")}
+                canCreateReturnInvoice={canConvertDocument(selectedDoc, "returnInvoice")}
                 onChange={updateDocument}
                 onDelete={deleteDocument}
                 onExport={exportPdf}
                 onEmail={emailDocument}
                 onConvert={convertDocument}
                 onDuplicate={duplicateDocument}
+                onRestorePrevious={restorePreviousDocument}
                 onAdvanceStatus={advanceStatus}
                 onAddCatalogLine={addCatalogLine}
                 onAddAttachment={addDocumentAttachments}
@@ -1073,7 +1337,7 @@ export function App() {
               <div className="emptyState">
                 <FileText size={42} />
                 <h2>Document introuvable</h2>
-                <p>Le document selectionne n'existe plus ou n'a pas encore ete charge.</p>
+                <p>Le document sélectionné n'existe plus ou n'a pas encore été chargé.</p>
                 <button onClick={() => { setSelectedId(""); setView("documents"); }}><ArrowLeft size={17} /> Retour aux documents</button>
               </div>
             )}
@@ -1092,10 +1356,10 @@ export function App() {
                 <input
                   value={clientQuery}
                   onChange={(event) => setClientQuery(event.target.value)}
-                  placeholder="Rechercher par numero client, nom, contact, email, telephone, ville..."
+                  placeholder="Rechercher par numéro client, nom, email, téléphone, ville..."
                 />
               </div>
-              <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>
+              {canEditOperations && <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>}
             </div>
             <div className="listMeta">{filteredClients.length} client(s)</div>
             <div className="clientsLayout">
@@ -1108,19 +1372,19 @@ export function App() {
                   >
                     <span>{client.number}</span>
                     <strong>{client.name || "Client sans nom"}</strong>
-                    <em>{client.contact || client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
+                    <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
                   </button>
                 ))}
                 {!filteredClients.length && <div className="emptyRows">Aucun client ne correspond.</div>}
               </div>
               {selectedClientForEdit ? (
-                <ClientCard client={selectedClientForEdit} onChange={updateClient} onDelete={deleteClient} />
+                <ClientCard client={selectedClientForEdit} readOnly={!canEditOperations} canDelete={canDeleteClients} onChange={updateClient} onDelete={deleteClient} />
               ) : (
                 <div className="emptyState clientEmpty">
                   <Users size={42} />
                   <h2>{data.clients.length ? "Aucun client sélectionné" : "Aucun client"}</h2>
                   <p>{data.clients.length ? "Sélectionnez un client dans la liste pour modifier sa fiche." : "Ajoutez votre premier client pour le retrouver ici."}</p>
-                  <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>
+                  {canEditOperations && <button onClick={createClient}><UserPlus size={17} /> Ajouter un client</button>}
                 </div>
               )}
             </div>
@@ -1129,37 +1393,42 @@ export function App() {
 
         {view === "settings" && (
           <section className="settingsPanel">
-            <div className="panelTitle">
-              <h2>Identite et conditions</h2>
-              <div className="panelActions">
-                <button className="ghost" onClick={copyCompany}><Clipboard size={17} /> Copier</button>
-                <button className="ghost" onClick={emailCompany}><Mail size={17} /> Email</button>
-                <button onClick={exportCompanyPdf}><Download size={17} /> PDF</button>
-              </div>
-            </div>
-            <FormGrid
-              value={data.company}
-              onChange={(company) => persist({ ...data, company })}
-              fields={[
-                ["name", "Nom commercial", "text", "Votre societe"],
-                ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
-                ["siret", "SIRET", "text", "123 456 789 00010"],
-                ["vatNumber", "N TVA", "text", "FR..."],
-                ["address", "Adresse", "text", "12 rue des Copeaux"],
-                ["postalCode", "Code postal", "text", "75000"],
-                ["city", "Ville", "text", "Paris"],
-                ["phone", "Telephone", "text", "01 23 45 67 89"],
-                ["email", "Email", "text", "contact@societe.fr"],
-                ["website", "Site web", "text", "https://..."],
-                ["iban", "IBAN", "text", "FR76..."],
-                ["bic", "BIC", "text", "ABCDEFGH"],
-                ["quoteValidityDays", "Validite devis (jours)", "number", "30"],
-                ["defaultVatRate", "TVA par defaut", "number", "20"],
-                ["defaultDepositRate", "Acompte par defaut", "number", "30"],
-              ]}
-            />
-            <label className="fullLabel">Conditions de paiement<textarea placeholder="Ex: 30% d'acompte a la commande..." value={data.company.paymentTerms} onChange={(event) => persist({ ...data, company: { ...data.company, paymentTerms: event.target.value } })} /></label>
-            <label className="fullLabel">Note par defaut<textarea placeholder="Note affichee sur les nouveaux documents" value={data.company.notes} onChange={(event) => persist({ ...data, company: { ...data.company, notes: event.target.value } })} /></label>
+            {canViewCompanySettings && (
+              <>
+                <div className="panelTitle">
+                  <h2>Identité et conditions</h2>
+                  <div className="panelActions">
+                    <button className="ghost" onClick={copyCompany}><Clipboard size={17} /> Copier</button>
+                    <button className="ghost" onClick={emailCompany}><Mail size={17} /> Email</button>
+                    <button onClick={exportCompanyPdf}><Download size={17} /> PDF</button>
+                  </div>
+                </div>
+                <FormGrid
+                  value={data.company}
+                  readOnly={!canManageCompany}
+                  onChange={(company) => persist({ ...data, company })}
+                  fields={[
+                    ["name", "Nom commercial", "text", "Votre société"],
+                    ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
+                    ["siret", "SIRET", "text", "123 456 789 00010"],
+                    ["vatNumber", "N° TVA", "text", "FR..."],
+                    ["address", "Adresse", "text", "12 rue des Copeaux"],
+                    ["postalCode", "Code postal", "text", "75000"],
+                    ["city", "Ville", "text", "Paris"],
+                    ["phone", "Téléphone", "text", "01 23 45 67 89"],
+                    ["email", "Email", "text", "contact@societe.fr"],
+                    ["website", "Site web", "text", "https://..."],
+                    ["iban", "IBAN", "text", "FR76..."],
+                    ["bic", "BIC", "text", "ABCDEFGH"],
+                    ["quoteValidityDays", "Validité devis (jours)", "number", "30"],
+                    ["defaultVatRate", "TVA par défaut", "number", "20"],
+                    ["defaultDepositRate", "Acompte par défaut", "number", "30"],
+                  ]}
+                />
+                <label className="fullLabel">Conditions de paiement<textarea disabled={!canManageCompany} placeholder="Ex. : 30 % d'acompte à la commande..." value={data.company.paymentTerms} onChange={(event) => persist({ ...data, company: { ...data.company, paymentTerms: event.target.value } })} /></label>
+                <label className="fullLabel">Note par défaut<textarea disabled={!canManageCompany} placeholder="Note affichée sur les nouveaux documents" value={data.company.notes} onChange={(event) => persist({ ...data, company: { ...data.company, notes: event.target.value } })} /></label>
+              </>
+            )}
             {workspace && (
               <AccountPasswordSettings
                 email={workspace.userEmail}
@@ -1169,9 +1438,10 @@ export function App() {
                 onPasswordChange={setAccountPassword}
                 onConfirmPasswordChange={setAccountPasswordConfirm}
                 onSubmit={submitAccountPassword}
+                onDeleteAccount={deleteAccount}
               />
             )}
-            {workspace && (
+            {workspace && canManageTeam && (
               <TeamSettings
                 workspace={workspace}
                 members={teamMembers}
@@ -1228,7 +1498,7 @@ function AuthScreen({
           <div className="logo">DV</div>
           <div>
             <strong>Devix</strong>
-            <span>Acces securise</span>
+            <span>Accès sécurisé</span>
           </div>
         </div>
         <div className="segmented authMode">
@@ -1245,10 +1515,10 @@ function AuthScreen({
         {message && <span className="authMessage">{message}</span>}
         <button type="submit" disabled={busy}>
           {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
-          {mode === "signin" ? "Se connecter" : "Creer le compte"}
+          {mode === "signin" ? "Se connecter" : "Créer le compte"}
         </button>
         <button className="ghost passwordLinkButton" type="button" disabled={busy} onClick={onPasswordSetup}>
-          Definir / reinitialiser le mot de passe
+          Définir / réinitialiser le mot de passe
         </button>
       </form>
     </main>
@@ -1263,6 +1533,7 @@ function AccountPasswordSettings({
   onPasswordChange,
   onConfirmPasswordChange,
   onSubmit,
+  onDeleteAccount,
 }: {
   email: string;
   password: string;
@@ -1271,24 +1542,55 @@ function AccountPasswordSettings({
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteAccount: () => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
   return (
     <section className="accountSection">
       <div className="panelTitle accountTitle">
         <div>
           <span className="eyebrow">Compte</span>
-          <h3>Mot de passe</h3>
+          <h3>Accès personnel</h3>
         </div>
-        <span className="accountEmail">{email}</span>
+        <div className="accountActions">
+          <span className="accountEmail">{email}</span>
+          <button className="ghost subtleButton" type="button" onClick={() => setIsOpen((value) => !value)}>
+            {isOpen ? "Masquer" : "Mot de passe"}
+          </button>
+        </div>
       </div>
-      <form className="accountPasswordForm" onSubmit={onSubmit}>
-        <label>Nouveau mot de passe<input type="password" autoComplete="new-password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="8 caracteres minimum" /></label>
-        <label>Confirmation<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => onConfirmPasswordChange(event.target.value)} placeholder="Repeter le mot de passe" /></label>
-        <button type="submit" disabled={busy || !password || !confirmPassword}>
-          {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
-          Enregistrer
-        </button>
-      </form>
+      {isOpen && (
+        <form className="accountPasswordForm" onSubmit={onSubmit}>
+          <label>Nouveau mot de passe<input type="password" autoComplete="new-password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="8 caractères minimum" /></label>
+          <label>Confirmation<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => onConfirmPasswordChange(event.target.value)} placeholder="Répéter le mot de passe" /></label>
+          <button type="submit" disabled={busy || !password || !confirmPassword}>
+            {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
+            Enregistrer
+          </button>
+        </form>
+      )}
+      <div className="accountDangerZone">
+        <div>
+          <strong>Supprimer le compte</strong>
+          <span>Suppression définitive de votre accès et de vos entreprises propriétaires.</span>
+        </div>
+        {deleteConfirmOpen ? (
+          <div className="accountDeleteConfirm">
+            <button className="ghost subtleButton" type="button" disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>
+              Annuler
+            </button>
+            <button className="danger subtleButton" type="button" disabled={busy} onClick={onDeleteAccount}>
+              Confirmer la suppression
+            </button>
+          </div>
+        ) : (
+          <button className="ghost subtleButton dangerTextButton" type="button" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
+            Supprimer le compte
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -1328,8 +1630,8 @@ function TeamSettings({
     <section className="teamSection">
       <div className="panelTitle teamTitle">
         <div>
-          <span className="eyebrow">Equipe</span>
-          <h3>Employes et acces</h3>
+          <span className="eyebrow">Équipe</span>
+          <h3>Employés et accès</h3>
         </div>
         <button className="ghost subtleButton" disabled={busy} onClick={onRefresh} type="button">
           {busy ? <LoaderCircle className="spinIcon" size={15} /> : <Users size={15} />}
@@ -1339,7 +1641,7 @@ function TeamSettings({
 
       {canManage && (
         <form className="inviteForm" onSubmit={onSubmitInvitation}>
-          <label>Email employe<input type="email" value={inviteEmail} onChange={(event) => onInviteEmailChange(event.target.value)} placeholder="prenom@societe.fr" /></label>
+          <label>Email employé<input type="email" value={inviteEmail} onChange={(event) => onInviteEmailChange(event.target.value)} placeholder="prenom@societe.fr" /></label>
           <label>Droits<select value={inviteRole} onChange={(event) => onInviteRoleChange(event.target.value as InviteRole)}>
             {inviteRoleOptions.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
           </select></label>
@@ -1370,14 +1672,14 @@ function TeamSettings({
                     </select>
                   )}
                   {canManage && (
-                    <button className="iconButton dangerIcon" disabled={locked || busy} onClick={() => onDeleteMember(member)} title="Retirer l'employe" type="button">
+                    <button className="iconButton dangerIcon" disabled={locked || busy} onClick={() => onDeleteMember(member)} title="Retirer l'employé" type="button">
                       <Trash2 size={17} />
                     </button>
                   )}
                 </div>
               );
             })}
-            {!members.length && <div className="emptyRows compactEmpty">Aucun membre charge.</div>}
+            {!members.length && <div className="emptyRows compactEmpty">Aucun membre chargé.</div>}
           </div>
         </div>
 
@@ -1394,7 +1696,7 @@ function TeamSettings({
                     <strong>{invitation.email}</strong>
                     <span>{roleLabels[invitation.role]} · expire le {formatShortDate(invitation.expiresAt)}</span>
                   </div>
-                  <span className="statusBadge info">Email envoye</span>
+                  <span className="statusBadge info">Email envoyé</span>
                   <button className="iconButton dangerIcon" disabled={busy} onClick={() => onRevokeInvitation(invitation)} title="Supprimer l'invitation" type="button">
                     <Trash2 size={17} />
                   </button>
@@ -1430,7 +1732,7 @@ function DocumentRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; cli
 }
 
 function DueRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; clients: Client[]; onOpen: (id: string) => void }) {
-  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune echeance ouverte.</div>;
+  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune échéance ouverte.</div>;
   return (
     <div className="dueRows">
       {docs.map((doc) => (
@@ -1461,12 +1763,17 @@ function DocumentEditor({
   doc,
   clients,
   catalog,
+  readOnly,
+  canRestorePrevious,
+  canCreateCreditNote,
+  canCreateReturnInvoice,
   onChange,
   onDelete,
   onExport,
   onEmail,
   onConvert,
   onDuplicate,
+  onRestorePrevious,
   onAdvanceStatus,
   onAddCatalogLine,
   onAddAttachment,
@@ -1476,12 +1783,17 @@ function DocumentEditor({
   doc: BusinessDocument;
   clients: Client[];
   catalog: AppData["catalog"];
+  readOnly: boolean;
+  canRestorePrevious: boolean;
+  canCreateCreditNote: boolean;
+  canCreateReturnInvoice: boolean;
   onChange: (doc: BusinessDocument) => void;
   onDelete: (doc: BusinessDocument) => void;
   onExport: (doc: BusinessDocument) => void;
   onEmail: (doc: BusinessDocument) => Promise<void>;
   onConvert: (doc: BusinessDocument, type: DocumentType) => void;
   onDuplicate: (doc: BusinessDocument) => void;
+  onRestorePrevious: (doc: BusinessDocument) => void;
   onAdvanceStatus: (doc: BusinessDocument) => void;
   onAddCatalogLine: (doc: BusinessDocument, catalogId: string) => void;
   onAddAttachment: (doc: BusinessDocument) => void;
@@ -1490,9 +1802,12 @@ function DocumentEditor({
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [emailing, setEmailing] = useState(false);
+  const [marginTargets, setMarginTargets] = useState<Record<string, string>>({});
+  const [marginHelperOpen, setMarginHelperOpen] = useState<Record<string, boolean>>({});
   const sums = totals(doc.lines);
   const client = clients.find((item) => item.id === doc.clientId);
   const quickStatusLabel = "Marquer payé";
+  const previousHistory = doc.history[doc.history.length - 1];
   const patch = (partial: Partial<BusinessDocument>) => onChange({ ...doc, ...partial });
   const patchLine = (id: string, partial: Partial<LineItem>) =>
     patch({ lines: doc.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
@@ -1514,67 +1829,110 @@ function DocumentEditor({
           <h2>{doc.number}</h2>
         </div>
         <div className="editorActions">
-          <StatusBadge status={doc.status} />
-          <select value={doc.status} onChange={(event) => patch({ status: event.target.value as DocumentStatus })}>
-            {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <button onClick={() => onAdvanceStatus(doc)}><Check size={17} /> {quickStatusLabel}</button>
+          {!readOnly && <button className="ghost" onClick={() => onDuplicate(doc)}><CopyPlus size={17} /> Dupliquer</button>}
+          {!readOnly && <button onClick={() => onAdvanceStatus(doc)}><Check size={17} /> {quickStatusLabel}</button>}
           {doc.history.length > 0 && <button className="ghost subtleButton" onClick={() => setHistoryOpen((value) => !value)}><History size={16} /> Historique</button>}
-          <button className="ghost" onClick={() => onDuplicate(doc)}><CopyPlus size={17} /> Dupliquer</button>
-          {doc.type === "quote" && <button onClick={() => onConvert(doc, "order")}><PackageCheck size={17} /> Transformer en BC</button>}
-          {doc.type === "order" && <button onClick={() => onConvert(doc, "invoice")}><ReceiptText size={17} /> Facturer</button>}
+          {canRestorePrevious && previousHistory && <button className="ghost" onClick={() => onRestorePrevious(doc)}><ArrowLeft size={17} /> Revenir en {labels[previousHistory.fromType]}</button>}
+          {!readOnly && doc.type === "quote" && <button onClick={() => onConvert(doc, "order")}><PackageCheck size={17} /> Transformer en BC</button>}
+          {!readOnly && doc.type === "order" && <button onClick={() => onConvert(doc, "invoice")}><ReceiptText size={17} /> Facturer</button>}
+          {canCreateCreditNote && <button onClick={() => onConvert(doc, "creditNote")}><ReceiptText size={17} /> Avoir</button>}
+          {canCreateReturnInvoice && <button onClick={() => onConvert(doc, "returnInvoice")}><PackageCheck size={17} /> Retour</button>}
           <button onClick={() => onExport(doc)}><Download size={17} /> PDF</button>
           <button className="ghost" disabled={emailing} onClick={sendEmail}>
             {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
             {emailing ? "Préparation..." : "Email"}
           </button>
-          <button className="danger" onClick={() => onDelete(doc)}><Trash2 size={17} /></button>
+          {!readOnly && <button className="danger" onClick={() => onDelete(doc)}><Trash2 size={17} /></button>}
         </div>
       </div>
 
       {historyOpen && <HistoryPanel doc={doc} />}
 
       <div className="editorGrid">
-        <label>Client<select value={doc.clientId} onChange={(event) => patch({ clientId: event.target.value })}>{clients.map((client) => <option key={client.id} value={client.id}>{clientLabel(client)}</option>)}</select></label>
-        <label>Nom du document / chantier<input placeholder="Ex: Dressing chambre parentale" value={doc.projectName} onChange={(event) => patch({ projectName: event.target.value })} /></label>
-        <label>Date<input type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} /></label>
-        <label>Echeance<input type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} /></label>
-        <label>Adresse chantier<input placeholder="Adresse du chantier si differente du client" value={doc.siteAddress} onChange={(event) => patch({ siteAddress: event.target.value })} /></label>
-        <label>Demarrage prevu<input placeholder="Ex: Semaine 42" value={doc.workStart} onChange={(event) => patch({ workStart: event.target.value })} /></label>
-        <label>Duree estimee<input placeholder="Ex: 3 jours" value={doc.workDuration} onChange={(event) => patch({ workDuration: event.target.value })} /></label>
-        <label>Acompte %<input type="number" placeholder="30" value={doc.depositRate || ""} onChange={(event) => patch({ depositRate: Number(event.target.value) })} /></label>
+        <label>Client<select disabled={readOnly} value={doc.clientId} onChange={(event) => patch({ clientId: event.target.value })}>{clients.map((client) => <option key={client.id} value={client.id}>{clientLabel(client)}</option>)}</select></label>
+        <label>Nom du document / chantier<input disabled={readOnly} placeholder="Ex. : dressing chambre parentale" value={doc.projectName} onChange={(event) => patch({ projectName: event.target.value })} /></label>
+        <label>Date<input disabled={readOnly} type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} /></label>
+        <label>Échéance<input disabled={readOnly} type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} /></label>
+        <label>Adresse chantier<input disabled={readOnly} placeholder="Adresse du chantier si différente du client" value={doc.siteAddress} onChange={(event) => patch({ siteAddress: event.target.value })} /></label>
+        <label>Démarrage prévu<input disabled={readOnly} placeholder="Ex. : semaine 42" value={doc.workStart} onChange={(event) => patch({ workStart: event.target.value })} /></label>
+        <label>Durée estimée<input disabled={readOnly} placeholder="Ex. : 3 jours" value={doc.workDuration} onChange={(event) => patch({ workDuration: event.target.value })} /></label>
+        <label>Acompte %<input disabled={readOnly} type="number" placeholder="30" value={doc.depositRate || ""} onChange={(event) => patch({ depositRate: Number(event.target.value) })} /></label>
       </div>
 
-      <div className="lineToolbar">
-        <select onChange={(event) => { onAddCatalogLine(doc, event.target.value); event.currentTarget.value = ""; }} defaultValue="">
-          <option value="" disabled>Ajouter depuis articles / prestations</option>
-          {catalog.map((item) => <option key={item.id} value={item.id}>{item.category || "Sans categorie"} - {item.name || "Article sans nom"} ({currency(item.price)}/{item.unit || "u"})</option>)}
-        </select>
-        <button onClick={() => patch({ lines: [...doc.lines, emptyLine(doc.lines[0]?.vatRate ?? 20)] })}><CopyPlus size={17} /> Ligne libre</button>
-      </div>
+      {!readOnly && (
+        <div className="lineToolbar">
+          <select onChange={(event) => { onAddCatalogLine(doc, event.target.value); event.currentTarget.value = ""; }} defaultValue="">
+            <option value="" disabled>Ajouter depuis articles / prestations</option>
+            {catalog.map((item) => <option key={item.id} value={item.id}>{item.category || "Sans catégorie"} - {item.name || "Article sans nom"} ({currency(item.price)}/{item.unit || "u"})</option>)}
+          </select>
+          <button onClick={() => patch({ lines: [...doc.lines, emptyLine(doc.lines[0]?.vatRate ?? 20)] })}><CopyPlus size={17} /> Ligne libre</button>
+        </div>
+      )}
 
       <div className="lineTable">
-        <div className="lineHead"><span>Designation</span><span>Unite</span><span>Qte</span><span>PU HT</span><span>Rem.</span><span>TVA</span><span>Total</span><span></span></div>
-        {doc.lines.map((line) => (
-          <div className="lineRow" key={line.id}>
-            <div>
-              <input placeholder="Nom de l'article ou prestation" value={line.description} onChange={(event) => patchLine(line.id, { description: event.target.value })} />
-              <textarea value={line.details} onChange={(event) => patchLine(line.id, { details: event.target.value })} placeholder="Details: essence, finition, quincaillerie, pose..." />
+        <div className="lineHead"><span>Désignation</span><span>Unité</span><span>Qté</span><span>PU HT</span><span>Remise</span><span>TVA</span><span>Total</span><span>Marge</span><span></span></div>
+        {doc.lines.map((line) => {
+          const margin = lineMargin(line);
+          const targetMargin = Number(marginTargets[line.id]);
+          const targetDiscount = Number.isFinite(targetMargin) ? requiredDiscountForMargin(line, targetMargin) : null;
+          const canApplyTargetDiscount = targetDiscount !== null && targetDiscount >= 0 && targetDiscount <= 100;
+          return (
+            <div className="lineRow" key={line.id}>
+              <div>
+                <input disabled={readOnly} placeholder="Nom de l'article ou prestation" value={line.description} onChange={(event) => patchLine(line.id, { description: event.target.value })} />
+                <textarea disabled={readOnly} value={line.details} onChange={(event) => patchLine(line.id, { details: event.target.value })} placeholder="Détails : essence, finition, quincaillerie, pose..." />
+                {!readOnly && (
+                  <div className="marginHelperShell">
+                    <button className="ghost subtleButton marginHelpButton" type="button" onClick={() => setMarginHelperOpen((open) => ({ ...open, [line.id]: !open[line.id] }))}>
+                      {marginHelperOpen[line.id] ? "Masquer aide marge" : "Aide marge"}
+                    </button>
+                    {marginHelperOpen[line.id] && (
+                      <div className="marginHelper">
+                        <label>
+                          Marge cible
+                          <span className="suffixInput compactSuffix">
+                            <input type="number" placeholder="30" value={marginTargets[line.id] || ""} onChange={(event) => setMarginTargets((targets) => ({ ...targets, [line.id]: event.target.value }))} />
+                            <span>%</span>
+                          </span>
+                        </label>
+                        <div>
+                          {!line.purchasePrice ? (
+                            <span>Main d'oeuvre : marge 100%</span>
+                          ) : targetDiscount === null || !marginTargets[line.id] ? (
+                            <span>Renseignez une marge cible</span>
+                          ) : canApplyTargetDiscount ? (
+                            <span>Remise conseillée : {targetDiscount.toFixed(1)}%</span>
+                          ) : (
+                            <span>Objectif impossible avec ce prix d'achat</span>
+                          )}
+                          <button className="ghost subtleButton" type="button" disabled={!canApplyTargetDiscount} onClick={() => patchLine(line.id, { discount: Number(targetDiscount?.toFixed(2)) })}>
+                            Appliquer
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <input disabled={readOnly} placeholder="u, ml, m2, h" value={line.unit} onChange={(event) => patchLine(line.id, { unit: event.target.value })} />
+              <input disabled={readOnly} type="number" placeholder="1" value={line.quantity || ""} onChange={(event) => patchLine(line.id, { quantity: Number(event.target.value) })} />
+              <input disabled={readOnly} type="number" placeholder="0.00" value={line.unitPrice || ""} onChange={(event) => patchLine(line.id, { unitPrice: Number(event.target.value) })} />
+              <span className="suffixInput"><input disabled={readOnly} type="number" placeholder="0" value={line.discount || ""} onChange={(event) => patchLine(line.id, { discount: Number(event.target.value) })} /><span>%</span></span>
+              <span className="suffixInput"><input disabled={readOnly} type="number" placeholder="20" value={line.vatRate || ""} onChange={(event) => patchLine(line.id, { vatRate: Number(event.target.value) })} /><span>%</span></span>
+              <strong>{currency((line.quantity * line.unitPrice) * (1 - line.discount / 100))}</strong>
+              <strong className={margin.amount < 0 ? "marginValue negative" : "marginValue"}>
+                <span>{currency(margin.amount)}</span>
+                <em>{margin.rate.toFixed(0)}%</em>
+              </strong>
+              {!readOnly && <button className="iconButton" onClick={() => patch({ lines: doc.lines.filter((item) => item.id !== line.id) })}><Trash2 size={16} /></button>}
             </div>
-            <input placeholder="u, ml, m2, h" value={line.unit} onChange={(event) => patchLine(line.id, { unit: event.target.value })} />
-            <input type="number" placeholder="1" value={line.quantity || ""} onChange={(event) => patchLine(line.id, { quantity: Number(event.target.value) })} />
-            <input type="number" placeholder="0.00" value={line.unitPrice || ""} onChange={(event) => patchLine(line.id, { unitPrice: Number(event.target.value) })} />
-            <input type="number" placeholder="0" value={line.discount || ""} onChange={(event) => patchLine(line.id, { discount: Number(event.target.value) })} />
-            <input type="number" placeholder="20" value={line.vatRate || ""} onChange={(event) => patchLine(line.id, { vatRate: Number(event.target.value) })} />
-            <strong>{currency((line.quantity * line.unitPrice) * (1 - line.discount / 100))}</strong>
-            <button className="iconButton" onClick={() => patch({ lines: doc.lines.filter((item) => item.id !== line.id) })}><Trash2 size={16} /></button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="bottomEditor">
-        <label>Note document<textarea placeholder="Informations affichees sur ce document" value={doc.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
-        <label>Conditions<textarea placeholder="Conditions propres a ce document" value={doc.terms} onChange={(event) => patch({ terms: event.target.value })} /></label>
+        <label>Note document<textarea disabled={readOnly} placeholder="Informations affichées sur ce document" value={doc.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
+        <label>Conditions<textarea disabled={readOnly} placeholder="Conditions propres à ce document" value={doc.terms} onChange={(event) => patch({ terms: event.target.value })} /></label>
         <div className="totalsBox">
           <div><span>Total HT</span><strong>{currency(sums.totalHt)}</strong></div>
           {Object.entries(sums.vatGroups).map(([rate, amount]) => <div key={rate}><span>TVA {rate}%</span><strong>{currency(amount)}</strong></div>)}
@@ -1583,18 +1941,18 @@ function DocumentEditor({
         </div>
       </div>
 
-      <section className="attachmentsPanel" aria-label="Pieces jointes">
+      <section className="attachmentsPanel" aria-label="Pièces jointes">
         <div className="attachmentsSummary">
           <div className="attachmentsTitle">
             <Paperclip size={15} />
             <div>
-              <h3>Documents associes</h3>
-              <span>{doc.attachments.length ? `${doc.attachments.length} piece(s) jointe(s)` : "Aucune piece jointe"}</span>
+              <h3>Documents associés</h3>
+              <span>{doc.attachments.length ? `${doc.attachments.length} pièce(s) jointe(s)` : "Aucune pièce jointe"}</span>
             </div>
           </div>
-          <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une piece jointe">
+          {!readOnly && <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une pièce jointe">
             <Paperclip size={16} /> Ajouter
-          </button>
+          </button>}
         </div>
         {doc.attachments.length > 0 && (
           <div className="attachmentList">
@@ -1602,10 +1960,10 @@ function DocumentEditor({
               <div className="attachmentRow" key={attachment.id}>
                 <div>
                   <strong>{attachment.name}</strong>
-                  <span>{fileSizeLabel(attachment.size)} - ajoute le {formatShortDate(attachment.addedAt)}</span>
+                  <span>{fileSizeLabel(attachment.size)} - ajouté le {formatShortDate(attachment.addedAt)}</span>
                 </div>
-                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la piece jointe"><ExternalLink size={16} /></button>
-                <button className="iconButton dangerIcon" onClick={() => onRemoveAttachment(doc, attachment)} title="Supprimer la piece jointe"><Trash2 size={16} /></button>
+                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la pièce jointe"><ExternalLink size={16} /></button>
+                {!readOnly && <button className="iconButton dangerIcon" onClick={() => onRemoveAttachment(doc, attachment)} title="Supprimer la pièce jointe"><Trash2 size={16} /></button>}
               </div>
             ))}
           </div>
@@ -1674,24 +2032,131 @@ function CatalogManager({
   onDelete: (item: CatalogItem) => void;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = items.filter((item) => `${item.name} ${item.category} ${item.unit}`.toLowerCase().includes(query.toLowerCase()));
+  const [movementDrafts, setMovementDrafts] = useState<Record<string, { quantity: string; reason: string }>>({});
+  const [movementOpen, setMovementOpen] = useState<Record<string, boolean>>({});
+  const filtered = items.filter((item) =>
+    `${item.name} ${item.category} ${item.unit} ${item.supplier} ${item.location}`.toLowerCase().includes(query.toLowerCase())
+  );
+  const trackedItems = items.filter((item) => item.trackStock);
+  const lowStockCount = trackedItems.filter((item) => item.stockQuantity > 0 && item.stockQuantity <= item.stockMinimum).length;
+  const outOfStockCount = trackedItems.filter((item) => item.stockQuantity <= 0).length;
   const patch = (item: CatalogItem, partial: Partial<CatalogItem>) => onChange({ ...item, ...partial });
+  const movementDraft = (itemId: string) => movementDrafts[itemId] || { quantity: "", reason: "" };
+  const patchMovementDraft = (itemId: string, partial: Partial<{ quantity: string; reason: string }>) =>
+    setMovementDrafts((drafts) => ({ ...drafts, [itemId]: { ...movementDraft(itemId), ...partial } }));
+  const stockTone = (item: CatalogItem) => {
+    if (!item.trackStock) return "neutral";
+    if (item.stockQuantity <= 0) return "danger";
+    if (item.stockQuantity <= item.stockMinimum) return "warning";
+    return "success";
+  };
+  const stockLabel = (item: CatalogItem) => {
+    if (!item.trackStock) return "Non suivi";
+    if (item.stockQuantity <= 0) return "Rupture";
+    if (item.stockQuantity <= item.stockMinimum) return "Stock bas";
+    return "Stock OK";
+  };
+  const applyStockMovement = (item: CatalogItem, type: StockMovement["type"]) => {
+    const draft = movementDraft(item.id);
+    const quantity = Number(draft.quantity);
+    if (!Number.isFinite(quantity) || quantity < 0) return;
+    const previousQuantity = Number(item.stockQuantity) || 0;
+    const nextQuantity =
+      type === "entry"
+        ? previousQuantity + quantity
+        : type === "exit"
+          ? Math.max(0, previousQuantity - quantity)
+          : quantity;
+    const movement: StockMovement = {
+      id: makeId("stock"),
+      type,
+      quantity: type === "adjustment" ? Math.abs(nextQuantity - previousQuantity) : quantity,
+      previousQuantity,
+      nextQuantity,
+      reason: draft.reason.trim() || (type === "entry" ? "Entrée de stock" : type === "exit" ? "Sortie de stock" : "Correction inventaire"),
+      createdAt: new Date().toISOString(),
+    };
+    onChange({
+      ...item,
+      trackStock: true,
+      stockQuantity: nextQuantity,
+      stockMovements: [movement, ...(item.stockMovements || [])].slice(0, 30),
+    });
+    setMovementDrafts((drafts) => ({ ...drafts, [item.id]: { quantity: "", reason: "" } }));
+  };
 
   return (
     <section className="catalogPanel">
       <div className="catalogToolbar">
-        <div className="searchBox"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher article, prestation, categorie" /></div>
+        <div className="searchBox"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher article, prestation, catégorie, fournisseur..." /></div>
         <button onClick={onCreate}><Plus size={17} /> Ajouter</button>
+      </div>
+      <div className="stockSummary">
+        <div><span>Articles suivis</span><strong>{trackedItems.length}</strong></div>
+        <div><span>Stock bas</span><strong>{lowStockCount}</strong></div>
+        <div><span>Rupture</span><strong>{outOfStockCount}</strong></div>
       </div>
       <div className="catalogList">
         {filtered.map((item) => (
           <article key={item.id} className="catalogRow">
-            <label>Nom<input placeholder="Ex: Pose et ajustements" value={item.name} onChange={(event) => patch(item, { name: event.target.value })} /></label>
-            <label>Categorie<input placeholder="Ex: Pose, fabrication" value={item.category} onChange={(event) => patch(item, { category: event.target.value })} /></label>
-            <label>Unite<input placeholder="u, h, ml, m2" value={item.unit} onChange={(event) => patch(item, { unit: event.target.value })} /></label>
-            <label>Prix HT<input type="number" placeholder="0.00" value={item.price || ""} onChange={(event) => patch(item, { price: Number(event.target.value) })} /></label>
-            <label>TVA %<input type="number" placeholder="20" value={item.vatRate || ""} onChange={(event) => patch(item, { vatRate: Number(event.target.value) })} /></label>
-            <button className="iconButton" onClick={() => onDelete(item)}><Trash2 size={16} /></button>
+            <div className="catalogMain">
+              <div className="catalogRowHeader">
+                <div>
+                  <strong>{item.name || "Article sans nom"}</strong>
+                  <span>{item.category || "Sans catégorie"}</span>
+                </div>
+                <span className={`statusBadge ${stockTone(item)}`}>{stockLabel(item)}</span>
+                <button className="iconButton" onClick={() => onDelete(item)}><Trash2 size={16} /></button>
+              </div>
+              <div className="catalogFields">
+                <label>Nom<input placeholder="Ex: Pose et ajustements" value={item.name} onChange={(event) => patch(item, { name: event.target.value })} /></label>
+                <label>Catégorie<input placeholder="Ex. : pose, fabrication" value={item.category} onChange={(event) => patch(item, { category: event.target.value })} /></label>
+                <label>Unité<input placeholder="u, h, ml, m2" value={item.unit} onChange={(event) => patch(item, { unit: event.target.value, stockUnit: event.target.value })} /></label>
+                <label>Prix HT<input type="number" placeholder="0.00" value={item.price || ""} onChange={(event) => patch(item, { price: Number(event.target.value) })} /></label>
+                <label>Prix d'achat<input type="number" placeholder="0 = main d'oeuvre" value={item.purchasePrice || ""} onChange={(event) => patch(item, { purchasePrice: Number(event.target.value) })} /></label>
+                <label>TVA<span className="suffixInput formSuffix"><input type="number" placeholder="20" value={item.vatRate || ""} onChange={(event) => patch(item, { vatRate: Number(event.target.value) })} /><span>%</span></span></label>
+              </div>
+            </div>
+            <div className="stockBlock">
+              <label className="stockToggle">
+                <input type="checkbox" checked={item.trackStock} onChange={(event) => patch(item, { trackStock: event.target.checked, stockUnit: item.unit })} />
+                Suivi du stock
+              </label>
+              {item.trackStock && (
+                <>
+                  <div className="stockFields">
+                    <label>Stock actuel<input type="number" value={item.stockQuantity || ""} onChange={(event) => patch(item, { stockQuantity: Number(event.target.value) })} /></label>
+                    <label>Stock minimum<input type="number" value={item.stockMinimum || ""} onChange={(event) => patch(item, { stockMinimum: Number(event.target.value) })} /></label>
+                    <div className="stockUnitReadout"><span>Unité stock</span><strong>{item.unit || "u"}</strong></div>
+                    <label>Fournisseur<input placeholder="Nom fournisseur" value={item.supplier} onChange={(event) => patch(item, { supplier: event.target.value })} /></label>
+                    <label>Emplacement<input placeholder="Atelier, dépôt..." value={item.location} onChange={(event) => patch(item, { location: event.target.value })} /></label>
+                  </div>
+                  <button className="ghost subtleButton stockMovementToggle" type="button" onClick={() => setMovementOpen((open) => ({ ...open, [item.id]: !open[item.id] }))}>
+                    {movementOpen[item.id] ? "Masquer entrées / sorties" : "Entrées / sorties"}
+                  </button>
+                  {movementOpen[item.id] && (
+                    <div className="stockMovementPanel">
+                      <div className="stockMovement">
+                        <input type="number" min="0" placeholder="Qté" value={movementDraft(item.id).quantity} onChange={(event) => patchMovementDraft(item.id, { quantity: event.target.value })} />
+                        <input placeholder="Motif" value={movementDraft(item.id).reason} onChange={(event) => patchMovementDraft(item.id, { reason: event.target.value })} />
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "entry")}>Entrée</button>
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "exit")}>Sortie</button>
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "adjustment")}>Corriger</button>
+                      </div>
+                      {!!item.stockMovements?.length && (
+                        <div className="stockHistory">
+                          {item.stockMovements.slice(0, 3).map((movement) => (
+                            <span key={movement.id}>
+                              {formatShortDate(movement.createdAt)} : {movement.previousQuantity}{" -> "}{movement.nextQuantity} {item.unit || "u"} ({movement.reason})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </article>
         ))}
         {!filtered.length && <div className="emptyRows">Aucun article ne correspond.</div>}
@@ -1700,25 +2165,36 @@ function CatalogManager({
   );
 }
 
-function ClientCard({ client, onChange, onDelete }: { client: Client; onChange: (client: Client) => void; onDelete: (client: Client) => void }) {
+function ClientCard({
+  client,
+  readOnly,
+  canDelete,
+  onChange,
+  onDelete,
+}: {
+  client: Client;
+  readOnly: boolean;
+  canDelete: boolean;
+  onChange: (client: Client) => void;
+  onDelete: (client: Client) => void;
+}) {
   const patch = (partial: Partial<Client>) => onChange({ ...client, ...partial });
   return (
     <article className="clientCard">
       <div className="cardHeader">
         <strong>{client.number}</strong>
-        <button className="iconButton" onClick={() => onDelete(client)}><Trash2 size={16} /></button>
+        {canDelete && <button className="iconButton" onClick={() => onDelete(client)}><Trash2 size={16} /></button>}
       </div>
-      <label>Type<select value={client.type} onChange={(event) => patch({ type: event.target.value as Client["type"] })}><option value="particulier">Particulier</option><option value="professionnel">Professionnel</option></select></label>
-      <label>Nom<input placeholder="Nom du client ou societe" value={client.name} onChange={(event) => patch({ name: event.target.value })} /></label>
-      <label>Contact<input placeholder="Personne a contacter" value={client.contact} onChange={(event) => patch({ contact: event.target.value })} /></label>
-      <label>Email<input placeholder="client@email.fr" value={client.email} onChange={(event) => patch({ email: event.target.value })} /></label>
-      <label>Telephone<input placeholder="06 00 00 00 00" value={client.phone} onChange={(event) => patch({ phone: event.target.value })} /></label>
-      <label>Adresse<input placeholder="Adresse du client" value={client.address} onChange={(event) => patch({ address: event.target.value })} /></label>
+      <label>Type<select disabled={readOnly} value={client.type} onChange={(event) => patch({ type: event.target.value as Client["type"] })}><option value="particulier">Particulier</option><option value="professionnel">Professionnel</option></select></label>
+      <label>Nom<input disabled={readOnly} placeholder="Nom du client ou société" value={client.name} onChange={(event) => patch({ name: event.target.value })} /></label>
+      <label>Email<input disabled={readOnly} placeholder="client@email.fr" value={client.email} onChange={(event) => patch({ email: event.target.value })} /></label>
+      <label>Téléphone<input disabled={readOnly} inputMode="tel" placeholder="06 00 00 00 00" value={client.phone} onChange={(event) => patch({ phone: formatPhoneNumber(event.target.value) })} /></label>
+      <label>Adresse<input disabled={readOnly} placeholder="Adresse du client" value={client.address} onChange={(event) => patch({ address: event.target.value })} /></label>
       <div className="twoCols">
-        <label>CP<input placeholder="75000" value={client.postalCode} onChange={(event) => patch({ postalCode: event.target.value })} /></label>
-        <label>Ville<input placeholder="Paris" value={client.city} onChange={(event) => patch({ city: event.target.value })} /></label>
+        <label>CP<input disabled={readOnly} placeholder="75000" value={client.postalCode} onChange={(event) => patch({ postalCode: event.target.value })} /></label>
+        <label>Ville<input disabled={readOnly} placeholder="Paris" value={client.city} onChange={(event) => patch({ city: event.target.value })} /></label>
       </div>
-      <label>Notes<textarea placeholder="Informations internes" value={client.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
+      <label>Notes<textarea disabled={readOnly} placeholder="Informations internes" value={client.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
     </article>
   );
 }
@@ -1726,10 +2202,12 @@ function ClientCard({ client, onChange, onDelete }: { client: Client; onChange: 
 function FormGrid<T extends CompanySettings>({
   value,
   fields,
+  readOnly = false,
   onChange,
 }: {
   value: T;
   fields: Array<[keyof T, string, "text" | "number", string]>;
+  readOnly?: boolean;
   onChange: (value: T) => void;
 }) {
   return (
@@ -1738,10 +2216,14 @@ function FormGrid<T extends CompanySettings>({
         <label key={String(key)}>
           {label}
           <input
+            disabled={readOnly}
             type={type}
             placeholder={placeholder}
             value={String(value[key] ?? "")}
-            onChange={(event) => onChange({ ...value, [key]: type === "number" ? Number(event.target.value) : event.target.value })}
+            onChange={(event) => {
+              const textValue = String(key) === "phone" ? formatPhoneNumber(event.target.value) : event.target.value;
+              onChange({ ...value, [key]: type === "number" ? Number(event.target.value) : textValue });
+            }}
           />
         </label>
       ))}

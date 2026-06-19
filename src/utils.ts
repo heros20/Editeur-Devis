@@ -4,6 +4,8 @@ export const numberPrefixes: Record<DocumentType | "client", string> = {
   quote: "DEV",
   order: "BC",
   invoice: "FAC",
+  creditNote: "AVO",
+  returnInvoice: "RET",
   client: "CLI",
 };
 
@@ -11,6 +13,8 @@ export const labels: Record<DocumentType, string> = {
   quote: "Devis",
   order: "Bon de commande",
   invoice: "Facture",
+  creditNote: "Facture d'avoir",
+  returnInvoice: "Facture de retour",
 };
 
 export const statusLabels: Record<string, string> = {
@@ -53,6 +57,18 @@ export function lineTotalHt(line: LineItem) {
   return gross - gross * ((Number(line.discount) || 0) / 100);
 }
 
+export function lineMargin(line: LineItem) {
+  const total = lineTotalHt(line);
+  const purchasePrice = Number(line.purchasePrice) || 0;
+  const purchaseTotal = purchasePrice > 0 ? (Number(line.quantity) || 0) * purchasePrice : 0;
+  const amount = total - purchaseTotal;
+  const rate = total > 0 ? (amount / total) * 100 : 0;
+  return {
+    amount,
+    rate: purchasePrice > 0 ? rate : total > 0 ? 100 : 0,
+  };
+}
+
 export function totals(lines: LineItem[]) {
   const totalHt = lines.reduce((sum, line) => sum + lineTotalHt(line), 0);
   const vatGroups = lines.reduce<Record<string, number>>((groups, line) => {
@@ -71,7 +87,7 @@ export function totals(lines: LineItem[]) {
 
 export function clientLabel(client?: Client) {
   if (!client) return "Client non renseigné";
-  return client.contact ? `${client.name} - ${client.contact}` : client.name;
+  return client.name;
 }
 
 export function sanitizeFileName(value: string) {

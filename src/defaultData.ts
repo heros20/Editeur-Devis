@@ -34,15 +34,15 @@ export const defaultCompany: CompanySettings = {
 };
 
 export const defaultCatalog: CatalogItem[] = [
-  { id: "cat-1", name: "Meuble sur mesure", unit: "u", price: 1450, vatRate: 20, category: "Fabrication" },
-  { id: "cat-2", name: "Placard / dressing mélaminé", unit: "ml", price: 680, vatRate: 20, category: "Agencement" },
-  { id: "cat-3", name: "Bibliothèque chêne plaqué", unit: "ml", price: 920, vatRate: 20, category: "Agencement" },
-  { id: "cat-4", name: "Plan de travail bois massif", unit: "ml", price: 260, vatRate: 20, category: "Bois massif" },
-  { id: "cat-5", name: "Pose et ajustements sur site", unit: "h", price: 58, vatRate: 10, category: "Pose" },
-  { id: "cat-6", name: "Finition vernis mat / huile dure", unit: "m2", price: 42, vatRate: 20, category: "Finition" },
+  { id: "cat-1", name: "Meuble sur mesure", unit: "u", price: 1450, purchasePrice: 0, vatRate: 20, category: "Fabrication", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "u", supplier: "", location: "", stockMovements: [] },
+  { id: "cat-2", name: "Placard / dressing mélaminé", unit: "ml", price: 680, purchasePrice: 0, vatRate: 20, category: "Agencement", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
+  { id: "cat-3", name: "Bibliothèque chêne plaqué", unit: "ml", price: 920, purchasePrice: 0, vatRate: 20, category: "Agencement", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
+  { id: "cat-4", name: "Plan de travail bois massif", unit: "ml", price: 260, purchasePrice: 0, vatRate: 20, category: "Bois massif", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
+  { id: "cat-5", name: "Pose et ajustements sur site", unit: "h", price: 58, purchasePrice: 0, vatRate: 10, category: "Pose", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "h", supplier: "", location: "", stockMovements: [] },
+  { id: "cat-6", name: "Finition vernis mat / huile dure", unit: "m2", price: 42, purchasePrice: 0, vatRate: 20, category: "Finition", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "m2", supplier: "", location: "", stockMovements: [] },
 ];
 
-const documentTypes: DocumentType[] = ["quote", "order", "invoice"];
+const documentTypes: DocumentType[] = ["quote", "order", "invoice", "creditNote", "returnInvoice"];
 
 export function createDefaultAppData(): AppData {
   return {
@@ -51,6 +51,8 @@ export function createDefaultAppData(): AppData {
       quote: 1,
       order: 1,
       invoice: 1,
+      creditNote: 1,
+      returnInvoice: 1,
       client: 1,
     },
     clients: [],
@@ -97,8 +99,10 @@ function normalizeLine(line: Partial<LineItem>, defaultVatRate: number): LineIte
     unit: line.unit || "",
     quantity: normalizeNumber(line.quantity, 1),
     unitPrice: normalizeNumber(line.unitPrice, 0),
+    purchasePrice: normalizeNumber(line.purchasePrice, 0),
     vatRate: normalizeNumber(line.vatRate, defaultVatRate),
     discount: normalizeNumber(line.discount, 0),
+    catalogItemId: line.catalogItemId,
   };
 }
 
@@ -195,8 +199,26 @@ function normalizeCatalogItem(item: Partial<CatalogItem>): CatalogItem {
     name: item.name || "",
     unit: item.unit || "",
     price: normalizeNumber(item.price, 0),
+    purchasePrice: normalizeNumber(item.purchasePrice, 0),
     vatRate: normalizeNumber(item.vatRate, defaultCompany.defaultVatRate),
     category: item.category || "",
+    trackStock: Boolean(item.trackStock),
+    stockQuantity: normalizeNumber(item.stockQuantity, 0),
+    stockMinimum: normalizeNumber(item.stockMinimum, 0),
+    stockUnit: item.stockUnit || item.unit || "",
+    supplier: item.supplier || "",
+    location: item.location || "",
+    stockMovements: Array.isArray(item.stockMovements)
+      ? item.stockMovements.map((movement) => ({
+        id: movement.id || makeId("stock"),
+        type: movement.type === "entry" || movement.type === "exit" ? movement.type : "adjustment",
+        quantity: normalizeNumber(movement.quantity, 0),
+        previousQuantity: normalizeNumber(movement.previousQuantity, 0),
+        nextQuantity: normalizeNumber(movement.nextQuantity, 0),
+        reason: movement.reason || "",
+        createdAt: movement.createdAt || new Date().toISOString(),
+      }))
+      : [],
   };
 }
 
@@ -214,7 +236,7 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     documents: Array.isArray(input?.documents)
       ? input.documents.map((doc) => normalizeDocument(doc, company.defaultVatRate))
       : fallback.documents,
-    catalog: Array.isArray(input?.catalog) && input.catalog.length
+    catalog: Array.isArray(input?.catalog)
       ? input.catalog.map(normalizeCatalogItem)
       : fallback.catalog,
   };

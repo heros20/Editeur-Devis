@@ -44,3 +44,44 @@ npm run dist
 ```
 
 Les erreurs du type `CORS`, `origin null`, `file://` ou `Failed to load resource /src/main.tsx` apparaissent uniquement quand on ouvre le HTML directement dans un navigateur. Ce n'est pas le bon mode de lancement pour cette application.
+
+## Liens email Supabase
+
+Les confirmations de compte, invitations equipe et reinitialisations de mot de passe utilisent `VITE_AUTH_REDIRECT_URL`.
+
+Pour une application installee, utiliser:
+
+```text
+VITE_AUTH_REDIRECT_URL=atelier://app/index.html
+```
+
+Pour un usage multi-machines sans application installee, utiliser plutot une URL HTTPS stable, par exemple une petite page web de redirection:
+
+```text
+VITE_AUTH_REDIRECT_URL=https://votre-domaine.fr/auth/callback
+```
+
+Cette URL doit aussi etre ajoutee dans Supabase, dans Authentication > URL Configuration > Redirect URLs.
+
+Le dossier `auth-callback/` contient une page statique prete a heberger. Elle recupere les parametres du lien Supabase puis ouvre Devix avec le protocole `atelier://`.
+
+Exemple avec Vercel ou Netlify:
+
+```text
+Publier le dossier: auth-callback
+URL obtenue: https://devix-auth.vercel.app
+VITE_AUTH_REDIRECT_URL=https://devix-auth.vercel.app
+```
+
+Ajouter ensuite cette meme URL dans Supabase:
+
+```text
+Authentication > URL Configuration > Redirect URLs
+https://devix-auth.vercel.app
+```
+
+Si vous publiez la page dans un sous-dossier, utilisez l'URL complete, par exemple:
+
+```text
+https://votre-domaine.fr/auth/callback
+```

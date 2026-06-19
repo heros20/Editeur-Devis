@@ -4,6 +4,7 @@ import type { AppData, DocumentAttachment, DocumentType } from "./types";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://srfaeqhepmogxsdiympq.supabase.co";
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_zjwJgUjvYlh6F_ltZOXEHQ_lbINP1L9";
+const configuredAuthRedirectUrl = String(import.meta.env.VITE_AUTH_REDIRECT_URL || "").trim();
 const attachmentsBucket = "document-attachments";
 const desktopRedirectUrl = "atelier://app/index.html";
 
@@ -89,6 +90,7 @@ function assertRemoteError(error: unknown) {
 }
 
 function authRedirectUrl() {
+  if (configuredAuthRedirectUrl) return configuredAuthRedirectUrl;
   if (window.location.protocol === "atelier:") return desktopRedirectUrl;
   return window.location.origin;
 }
@@ -97,6 +99,7 @@ function defaultWorkspaceData(organizationName: string) {
   const fallback = createDefaultAppData();
   return normalizeData({
     ...fallback,
+    catalog: [],
     company: {
       ...fallback.company,
       name: fallback.company.name,
@@ -145,7 +148,7 @@ export async function sendPasswordSetupEmail(email: string) {
 
 export async function updateCurrentUserPassword(password: string) {
   const nextPassword = password.trim();
-  if (nextPassword.length < 8) throw new Error("Le mot de passe doit contenir au moins 8 caracteres.");
+  if (nextPassword.length < 8) throw new Error("Le mot de passe doit contenir au moins 8 caractères.");
   const { data, error } = await supabase.auth.updateUser({ password: nextPassword });
   assertRemoteError(error);
   return data.user;
@@ -165,6 +168,19 @@ export async function signInWithGoogle() {
 export async function signOutRemote() {
   const { error } = await supabase.auth.signOut();
   assertRemoteError(error);
+}
+
+export async function deleteCurrentAccount() {
+  const { data, error } = await supabase.functions.invoke("delete-account", {
+    body: { confirmation: "SUPPRIMER" },
+  });
+  assertRemoteError(error);
+
+  const payload = data as { deleted?: boolean; error?: string } | null;
+  if (payload?.error) throw new Error(payload.error);
+  if (!payload?.deleted) throw new Error("Suppression du compte impossible");
+
+  await supabase.auth.signOut().catch(() => undefined);
 }
 
 async function claimPendingInvitation() {
@@ -191,8 +207,8 @@ async function createOrganization(session: Session) {
     .insert({ name: defaultName, created_by: session.user.id });
   assertRemoteError(error);
 
-  const membership = await getFirstMembership();
-  if (!membership) throw new Error("Creation de l'entreprise impossible");
+  const membership = await getFirstMembership(session.user.id);
+  if (!membership) throw new Error("Création de l'entreprise impossible");
   return getOrganization(membership.organization_id);
 }
 
@@ -208,10 +224,11 @@ async function getMembership(organizationId: string, userId: string) {
   return data;
 }
 
-async function getFirstMembership() {
+async function getFirstMembership(userId: string) {
   const { data, error } = await supabase
     .from("organization_members")
     .select("organization_id, role, email")
+    .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .limit(1)
     .returns<MembershipRow[]>();
@@ -266,7 +283,7 @@ export async function loadRemoteWorkspace(preferredOrganizationId?: string) {
 
   const invitedOrganizationId = preferredOrganizationId ? "" : await claimPendingInvitation();
   const targetOrganizationId = preferredOrganizationId || invitedOrganizationId;
-  let membership = targetOrganizationId ? await getMembership(targetOrganizationId, session.user.id) : await getFirstMembership();
+  let membership = targetOrganizationId ? await getMembership(targetOrganizationId, session.user.id) : await getFirstMembership(session.user.id);
   let organization: OrganizationRow;
 
   if (!membership) {
@@ -299,14 +316,17 @@ export async function listTeamMembers(context: WorkspaceContext) {
     .returns<TeamMemberRow[]>();
   assertRemoteError(error);
 
-  return (data || []).map((row) => ({
-    id: row.id,
-    userId: row.user_id,
-    email: row.email || "",
-    role: row.role,
-    createdAt: row.created_at,
-    isCurrentUser: row.user_id === session.user.id,
-  }));
+  return (data || []).map((row) => {
+    const isCurrentUser = row.user_id === session.user.id;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      email: row.email || (isCurrentUser ? session.user.email || context.userEmail : ""),
+      role: row.role,
+      createdAt: row.created_at,
+      isCurrentUser,
+    };
+  });
 }
 
 export async function listTeamInvitations(context: WorkspaceContext) {
@@ -394,7 +414,7 @@ export async function reserveRemoteCounter(context: WorkspaceContext, type: Docu
     target_counter_type: type,
   });
   assertRemoteError(error);
-  if (typeof data !== "number") throw new Error("Numerotation indisponible");
+  if (typeof data !== "number") throw new Error("Numérotation indisponible");
   return data;
 }
 
@@ -431,7 +451,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 
 export async function uploadRemoteAttachment(context: WorkspaceContext, documentId: string, attachment: DocumentAttachment) {
   const dataUrl = attachmentDataUrl(attachment);
-  if (!dataUrl) throw new Error("Lecture de la piece jointe impossible");
+  if (!dataUrl) throw new Error("Lecture de la pièce jointe impossible");
 
   const { blob, mimeType } = blobFromDataUrl(dataUrl, attachment.mimeType);
   const path = `${context.organizationId}/${documentId}/${attachment.id}-${safeStorageName(attachment.name)}`;
@@ -454,10 +474,10 @@ export async function uploadRemoteAttachment(context: WorkspaceContext, document
 
 export async function openRemoteAttachment(attachment: DocumentAttachment) {
   const path = attachment.storagePath || attachment.filePath;
-  if (!path) throw new Error("Piece jointe introuvable");
+  if (!path) throw new Error("Pièce jointe introuvable");
   const { data, error } = await supabase.storage.from(attachmentsBucket).download(path);
   assertRemoteError(error);
-  if (!data) throw new Error("Piece jointe introuvable");
+  if (!data) throw new Error("Pièce jointe introuvable");
   downloadBlob(data, attachment.name);
 }
 
