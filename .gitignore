@@ -14,3 +14,4 @@ Thumbs.db
 # Local Electron/user data and generated installers should not be versioned.
 *.exe
 *.blockmap
+.vercel
