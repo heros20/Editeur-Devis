@@ -9,14 +9,33 @@ Il ne faut pas ouvrir `index.html` ou `dist/index.html` dans le navigateur. Ces 
 Double-cliquer:
 
 ```text
-LANCER-ATELIER-DU-BOIS.bat
+LANCER-DEVIX.bat
 ```
 
 Le lanceur utilise d'abord la version portable si elle existe, sinon il demarre le mode developpement:
 
 ```text
-release\Devix 1.0.1.exe
+release\Devix-1.0.2-Portable.exe
 ```
+
+L'ancien lanceur `LANCER-ATELIER-DU-BOIS.bat` reste compatible.
+
+## Utiliser sur cle USB
+
+Copier ces elements sur la cle:
+
+```text
+release\Devix-1.0.2-Portable.exe
+LANCER-DEVIX.bat
+```
+
+Au premier lancement portable, Devix cree automatiquement ce dossier a cote de l'executable:
+
+```text
+Devix-data
+```
+
+Ce dossier contient les donnees locales, les pieces jointes et les sauvegardes locales. Pour deplacer Devix, copier l'executable portable et `Devix-data` ensemble.
 
 ## Lancer depuis le terminal
 

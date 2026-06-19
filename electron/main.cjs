@@ -9,6 +9,13 @@ const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
 const appProtocol = "atelier";
 let mainWindow;
 let pendingDeepLinkUrl = process.argv.find((arg) => arg.startsWith(`${appProtocol}://`)) || "";
+const portableDataRoot = process.env.PORTABLE_EXECUTABLE_DIR
+  ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, "Devix-data")
+  : "";
+
+if (portableDataRoot) {
+  app.setPath("userData", portableDataRoot);
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -51,26 +58,14 @@ const defaultData = {
     quote: 1,
     order: 1,
     invoice: 1,
+    creditNote: 1,
+    returnInvoice: 1,
     client: 1,
   },
   clients: [],
   documents: [],
-  catalog: [
-    { id: "cat-1", name: "Meuble sur mesure", unit: "u", price: 1450, vatRate: 20, category: "Fabrication" },
-    { id: "cat-2", name: "Placard / dressing mélaminé", unit: "ml", price: 680, vatRate: 20, category: "Agencement" },
-    { id: "cat-3", name: "Bibliothèque chêne plaqué", unit: "ml", price: 920, vatRate: 20, category: "Agencement" },
-    { id: "cat-4", name: "Plan de travail bois massif", unit: "ml", price: 260, vatRate: 20, category: "Bois massif" },
-    { id: "cat-5", name: "Pose et ajustements sur site", unit: "h", price: 58, vatRate: 10, category: "Pose" },
-    { id: "cat-6", name: "Finition vernis mat / huile dure", unit: "m2", price: 42, vatRate: 20, category: "Finition" }
-  ],
+  catalog: [],
 };
-
-defaultData.company.paymentTerms = "";
-defaultData.catalog = defaultData.catalog.map((item) => {
-  if (item.id === "cat-2") return { ...item, name: "Placard / dressing mélaminé" };
-  if (item.id === "cat-3") return { ...item, name: "Bibliothèque chêne plaqué" };
-  return item;
-});
 
 function getDataPath() {
   return path.join(app.getPath("userData"), "atelier-du-bois-data.json");
@@ -215,7 +210,7 @@ async function readStore() {
     counters: { ...defaultData.counters, ...(parsed.counters || {}) },
     clients: Array.isArray(parsed.clients) ? parsed.clients : [],
     documents: Array.isArray(parsed.documents) ? parsed.documents : [],
-    catalog: Array.isArray(parsed.catalog) && parsed.catalog.length ? parsed.catalog : defaultData.catalog,
+    catalog: Array.isArray(parsed.catalog) ? parsed.catalog : defaultData.catalog,
   };
 }
 
@@ -326,7 +321,8 @@ ipcMain.handle("store:save", async (_event, data) => writeStore(data));
 
 ipcMain.handle("store:next-number", async (_event, type) => {
   const data = await readStore();
-  const prefixes = { quote: "DEV", order: "BC", invoice: "FAC", client: "CLI" };
+  const prefixes = { quote: "DEV", order: "BC", invoice: "FAC", creditNote: "AVO", returnInvoice: "RET", client: "CLI" };
+  if (!prefixes[type]) throw new Error(`Type de compteur inconnu: ${type}`);
   return makeNumber(prefixes[type], data.counters[type] || 1);
 });
 

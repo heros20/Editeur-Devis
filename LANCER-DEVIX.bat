@@ -19,7 +19,7 @@ echo Devix ne peut pas demarrer.
 echo.
 echo Solution:
 echo 1. npm install
-echo 2. npm run dev
+echo 2. npm run portable
 echo 3. Relancer ce fichier
 echo.
 pause

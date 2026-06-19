@@ -47,4 +47,7 @@ Portable seulement:
 npm run portable
 ```
 
+La version portable est generee dans `release/Devix-1.0.2-Portable.exe`.
+En mode portable, les donnees sont stockees dans `Devix-data` a cote de l'executable, ce qui permet de copier l'outil sur une cle USB avec ses donnees.
+
 Ne pas ouvrir `index.html` ou `dist/index.html` dans un navigateur. L'application doit etre lancee avec Electron.
