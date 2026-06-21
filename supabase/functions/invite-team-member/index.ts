@@ -17,7 +17,9 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 }
 
 function cleanEmail(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function cleanRole(value: unknown): InviteRole {
@@ -27,7 +29,9 @@ function cleanRole(value: unknown): InviteRole {
 function makeInviteToken() {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
 }
 
 Deno.serve(async (req) => {

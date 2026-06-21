@@ -19,13 +19,23 @@ export const labels: Record<DocumentType, string> = {
 
 export const statusLabels: Record<string, string> = {
   draft: "Brouillon",
+  partial: "Partiel",
   paid: "Payé",
 };
 
 export const statusTone: Record<string, string> = {
   draft: "neutral",
+  partial: "warning",
   paid: "success",
 };
+
+export const paymentMethodLabels = {
+  bank_transfer: "Virement",
+  check: "Chèque",
+  cash: "Espèces",
+  card: "Carte",
+  other: "Autre",
+} as const;
 
 export function makeId(prefix = "id") {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -83,6 +93,27 @@ export function totals(lines: LineItem[]) {
     totalVat,
     totalTtc: totalHt + totalVat,
   };
+}
+
+export function paymentSummary(doc: BusinessDocument, totalTtc = totals(doc.lines).totalTtc) {
+  const depositPaidAmount = Math.max(0, Number(doc.depositPaidAmount) || 0);
+  const payments = Array.isArray(doc.payments) ? doc.payments : [];
+  const paymentAmount = payments.reduce((sum, payment) => sum + Math.max(0, Number(payment.amount) || 0), 0);
+  const paidAmount = depositPaidAmount + paymentAmount;
+  const remainingAmount = Math.max(0, totalTtc - paidAmount);
+  const status: "draft" | "partial" | "paid" = paidAmount <= 0.005 ? "draft" : remainingAmount <= 0.005 ? "paid" : "partial";
+
+  return {
+    depositPaidAmount,
+    paymentAmount,
+    paidAmount,
+    remainingAmount,
+    status,
+  };
+}
+
+export function withPaymentStatus(doc: BusinessDocument): BusinessDocument {
+  return { ...doc, status: paymentSummary(doc).status };
 }
 
 export function clientLabel(client?: Client) {

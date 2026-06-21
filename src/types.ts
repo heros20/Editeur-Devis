@@ -1,5 +1,6 @@
 export type DocumentType = "quote" | "order" | "invoice" | "creditNote" | "returnInvoice";
-export type DocumentStatus = "draft" | "paid";
+export type DocumentStatus = "draft" | "partial" | "paid";
+export type PaymentMethod = "bank_transfer" | "check" | "cash" | "card" | "other";
 
 export interface CompanySettings {
   name: string;
@@ -12,6 +13,7 @@ export interface CompanySettings {
   phone: string;
   email: string;
   website: string;
+  logoDataUrl: string;
   iban: string;
   bic: string;
   paymentTerms: string;
@@ -60,6 +62,22 @@ export interface DocumentAttachment {
   addedAt: string;
 }
 
+export interface PaymentEntry {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  paidAt: string;
+  note: string;
+  createdAt: string;
+}
+
+export interface PaymentReminder {
+  id: string;
+  sentAt: string;
+  channel: "email" | "phone" | "letter" | "other";
+  note: string;
+}
+
 export interface BusinessDocument {
   id: string;
   type: DocumentType;
@@ -78,6 +96,11 @@ export interface BusinessDocument {
   terms: string;
   lines: LineItem[];
   attachments: DocumentAttachment[];
+  depositPaidAmount: number;
+  depositPaidAt: string;
+  payments: PaymentEntry[];
+  paymentNotes: string;
+  reminders: PaymentReminder[];
   history: DocumentHistoryEntry[];
   createdAt: string;
   updatedAt: string;
@@ -99,6 +122,11 @@ export interface DocumentSnapshot {
   terms: string;
   lines: LineItem[];
   attachments: DocumentAttachment[];
+  depositPaidAmount: number;
+  depositPaidAt: string;
+  payments: PaymentEntry[];
+  paymentNotes: string;
+  reminders: PaymentReminder[];
   createdAt: string;
   updatedAt: string;
 }

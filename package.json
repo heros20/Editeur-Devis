@@ -7,8 +7,13 @@
   "scripts": {
     "dev": "node scripts/dev.cjs",
     "build": "tsc --noEmit && vite build",
+    "lint": "eslint .",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "test": "vitest run",
     "start": "node scripts/start.cjs",
     "dist": "npm run build && electron-builder",
+    "setup": "npm run build && electron-builder --win nsis",
     "portable": "npm run build && electron-builder --win portable"
   },
   "keywords": [
@@ -26,14 +31,21 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "prettier": "^3.8.4",
     "supabase": "^2.107.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16"
+    "typescript-eslint": "^8.61.1",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
   },
   "build": {
     "appId": "fr.devix.editeurdevis",

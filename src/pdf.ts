@@ -1,5 +1,5 @@
 import type { BusinessDocument, Client, CompanySettings } from "./types";
-import { currency, labels, lineTotalHt, statusLabels, totals } from "./utils";
+import { currency, labels, lineTotalHt, paymentSummary, statusLabels, totals } from "./utils";
 
 function esc(value: unknown) {
   return String(value ?? "")
@@ -9,8 +9,22 @@ function esc(value: unknown) {
     .replace(/"/g, "&quot;");
 }
 
+function logoMarkup(company: CompanySettings) {
+  if (!company.logoDataUrl) return "";
+  return `<span class="companyLogoSlot" style="width:34mm;height:22mm;max-width:34mm;max-height:22mm;display:flex;align-items:flex-start;justify-content:flex-start;overflow:hidden;flex:0 0 auto;"><img class="companyLogo" src="${esc(company.logoDataUrl)}" alt="" style="max-width:34mm;max-height:22mm;width:auto;height:auto;object-fit:contain;display:block;" /></span>`;
+}
+
 export function renderDocumentHtml(doc: BusinessDocument, client: Client | undefined, company: CompanySettings) {
   const sums = totals(doc.lines);
+  const paySummary = paymentSummary(doc, sums.totalTtc);
+  const paymentRows =
+    doc.type === "invoice"
+      ? `
+        <div><span>Acompte encaissé</span><strong>${currency(paySummary.depositPaidAmount)}</strong></div>
+        <div><span>Total réglé</span><strong>${currency(paySummary.paidAmount)}</strong></div>
+        <div><span>Reste dû</span><strong>${currency(paySummary.remainingAmount)}</strong></div>
+      `
+      : "";
   const vatRows = Object.entries(sums.vatGroups)
     .map(([rate, amount]) => `<div><span>TVA ${esc(rate)}%</span><strong>${currency(amount)}</strong></div>`)
     .join("");
@@ -39,6 +53,10 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
       body { margin: 0; font-family: Arial, sans-serif; color: #241b16; background: #fff; }
       .page { width: 210mm; min-height: 297mm; padding: 18mm; }
       header { display: flex; justify-content: space-between; gap: 28px; border-bottom: 3px solid #7b4b28; padding-bottom: 16px; }
+      .brand { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; }
+      .brandText { min-width: 0; }
+      .companyLogoSlot { width: 34mm; height: 22mm; max-width: 34mm; max-height: 22mm; overflow: hidden; }
+      .companyLogo { max-width: 34mm !important; max-height: 22mm !important; width: auto !important; height: auto !important; object-fit: contain; display: block; }
       .brand h1 { margin: 0; font-size: 30px; letter-spacing: 0; color: #4f2f1c; }
       .brand p, .meta p, .box p { margin: 3px 0; color: #5d5149; font-size: 12px; }
       .meta { text-align: right; }
@@ -67,10 +85,13 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
     <main class="page">
       <header>
         <div class="brand">
-          <h1>${esc(company.name)}</h1>
-          <p>${esc(company.address)} - ${esc(company.postalCode)} ${esc(company.city)}</p>
-          <p>${esc(company.phone)} - ${esc(company.email)}</p>
-          <p>SIRET ${esc(company.siret || "à renseigner")} ${company.vatNumber ? `- TVA ${esc(company.vatNumber)}` : ""}</p>
+          ${logoMarkup(company)}
+          <div class="brandText">
+            <h1>${esc(company.name)}</h1>
+            <p>${esc(company.address)} - ${esc(company.postalCode)} ${esc(company.city)}</p>
+            <p>${esc(company.phone)} - ${esc(company.email)}</p>
+            <p>SIRET ${esc(company.siret || "à renseigner")} ${company.vatNumber ? `- TVA ${esc(company.vatNumber)}` : ""}</p>
+          </div>
         </div>
         <div class="meta">
           <h2>${esc(labels[doc.type])}</h2>
@@ -108,6 +129,7 @@ export function renderDocumentHtml(doc: BusinessDocument, client: Client | undef
         <div><span>Total HT</span><strong>${currency(sums.totalHt)}</strong></div>
         ${vatRows}
         <div class="grand"><span>Total TTC</span><strong>${currency(sums.totalTtc)}</strong></div>
+        ${paymentRows}
       </section>
       <section class="terms">
         <div><h3>Conditions</h3><p>${esc(doc.terms || company.paymentTerms)}</p></div>
@@ -147,21 +169,36 @@ export function renderCompanyHtml(company: CompanySettings) {
       * { box-sizing: border-box; }
       body { margin: 0; font-family: Arial, sans-serif; color: #241b16; background: #fff; }
       .page { width: 210mm; min-height: 297mm; padding: 18mm; }
-      header { border-bottom: 3px solid #1f5f52; padding-bottom: 14px; margin-bottom: 18px; }
-      h1 { margin: 0; font-size: 30px; color: #1f5f52; }
-      p { margin: 5px 0 0; color: #5d5149; }
-      table { width: 100%; border-collapse: collapse; }
-      th { width: 42mm; text-align: left; color: #7b4b28; font-size: 12px; text-transform: uppercase; }
-      td, th { border-bottom: 1px solid #e5ddd4; padding: 10px 8px; vertical-align: top; white-space: pre-wrap; }
-      footer { margin-top: 22px; color: #766b63; font-size: 10px; }
+      header { display: flex; justify-content: space-between; gap: 28px; border-bottom: 3px solid #7b4b28; padding-bottom: 16px; margin-bottom: 22px; }
+      h1 { margin: 0; font-size: 30px; color: #4f2f1c; }
+      p { margin: 4px 0 0; color: #5d5149; font-size: 12px; }
+      .meta { text-align: right; }
+      .meta h2 { margin: 0 0 8px; font-size: 28px; color: #1f2d2b; }
+      .badge { display: inline-block; padding: 5px 9px; border: 1px solid #b9946c; border-radius: 4px; font-size: 11px; text-transform: uppercase; color: #6b4328; }
+      .summary { margin: 18px 0; padding: 12px; background: #f7f1ea; border-left: 4px solid #7b4b28; }
+      .summary h3 { margin: 0 0 5px; font-size: 16px; color: #241b16; }
+      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      th { width: 48mm; background: #1f2d2b; color: white; text-align: left; padding: 9px 7px; font-size: 11px; text-transform: uppercase; }
+      td { border-bottom: 1px solid #e7dfd5; padding: 9px 7px; vertical-align: top; white-space: pre-wrap; font-size: 12px; }
+      footer { margin-top: 20px; border-top: 1px solid #ded5cb; padding-top: 10px; color: #766b63; font-size: 10px; }
     </style>
   </head>
   <body>
     <main class="page">
       <header>
-        <h1>${esc(company.name || company.legalName || "Informations société")}</h1>
-        <p>${esc(company.legalName)}</p>
+        <div>
+          <h1>${esc(company.name || company.legalName || "Informations société")}</h1>
+          <p>${esc(company.legalName)}</p>
+        </div>
+        <div class="meta">
+          <h2>Fiche société</h2>
+          <span class="badge">Informations</span>
+        </div>
       </header>
+      <section class="summary">
+        <h3>${esc(company.name || company.legalName || "Société")}</h3>
+        <p>${esc(`${company.address}\n${company.postalCode} ${company.city}`.trim() || "Adresse à renseigner")}</p>
+      </section>
       <table>
         <tbody>
           ${rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "à renseigner")}</td></tr>`).join("")}

@@ -10,6 +10,9 @@ import type {
   DocumentType,
   DocumentAttachment,
   LineItem,
+  PaymentEntry,
+  PaymentMethod,
+  PaymentReminder,
 } from "./types";
 import { addDaysIso, makeId, todayIso } from "./utils";
 
@@ -24,6 +27,7 @@ export const defaultCompany: CompanySettings = {
   phone: "",
   email: "",
   website: "",
+  logoDataUrl: "",
   iban: "",
   bic: "",
   paymentTerms: "",
@@ -34,12 +38,102 @@ export const defaultCompany: CompanySettings = {
 };
 
 export const defaultCatalog: CatalogItem[] = [
-  { id: "cat-1", name: "Meuble sur mesure", unit: "u", price: 1450, purchasePrice: 0, vatRate: 20, category: "Fabrication", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "u", supplier: "", location: "", stockMovements: [] },
-  { id: "cat-2", name: "Placard / dressing mélaminé", unit: "ml", price: 680, purchasePrice: 0, vatRate: 20, category: "Agencement", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
-  { id: "cat-3", name: "Bibliothèque chêne plaqué", unit: "ml", price: 920, purchasePrice: 0, vatRate: 20, category: "Agencement", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
-  { id: "cat-4", name: "Plan de travail bois massif", unit: "ml", price: 260, purchasePrice: 0, vatRate: 20, category: "Bois massif", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "ml", supplier: "", location: "", stockMovements: [] },
-  { id: "cat-5", name: "Pose et ajustements sur site", unit: "h", price: 58, purchasePrice: 0, vatRate: 10, category: "Pose", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "h", supplier: "", location: "", stockMovements: [] },
-  { id: "cat-6", name: "Finition vernis mat / huile dure", unit: "m2", price: 42, purchasePrice: 0, vatRate: 20, category: "Finition", trackStock: false, stockQuantity: 0, stockMinimum: 0, stockUnit: "m2", supplier: "", location: "", stockMovements: [] },
+  {
+    id: "cat-1",
+    name: "Meuble sur mesure",
+    unit: "u",
+    price: 1450,
+    purchasePrice: 0,
+    vatRate: 20,
+    category: "Fabrication",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "u",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
+  {
+    id: "cat-2",
+    name: "Placard / dressing mélaminé",
+    unit: "ml",
+    price: 680,
+    purchasePrice: 0,
+    vatRate: 20,
+    category: "Agencement",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "ml",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
+  {
+    id: "cat-3",
+    name: "Bibliothèque chêne plaqué",
+    unit: "ml",
+    price: 920,
+    purchasePrice: 0,
+    vatRate: 20,
+    category: "Agencement",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "ml",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
+  {
+    id: "cat-4",
+    name: "Plan de travail bois massif",
+    unit: "ml",
+    price: 260,
+    purchasePrice: 0,
+    vatRate: 20,
+    category: "Bois massif",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "ml",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
+  {
+    id: "cat-5",
+    name: "Pose et ajustements sur site",
+    unit: "h",
+    price: 58,
+    purchasePrice: 0,
+    vatRate: 10,
+    category: "Pose",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "h",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
+  {
+    id: "cat-6",
+    name: "Finition vernis mat / huile dure",
+    unit: "m2",
+    price: 42,
+    purchasePrice: 0,
+    vatRate: 20,
+    category: "Finition",
+    trackStock: false,
+    stockQuantity: 0,
+    stockMinimum: 0,
+    stockUnit: "m2",
+    supplier: "",
+    location: "",
+    stockMovements: [],
+  },
 ];
 
 const documentTypes: DocumentType[] = ["quote", "order", "invoice", "creditNote", "returnInvoice"];
@@ -71,7 +165,12 @@ function normalizeDocumentType(value: unknown, fallback: DocumentType): Document
 }
 
 function normalizeDocumentStatus(value: unknown): DocumentStatus {
+  if (value === "partial") return "partial";
   return value === "paid" ? "paid" : "draft";
+}
+
+function normalizePaymentMethod(value: unknown): PaymentMethod {
+  return value === "check" || value === "cash" || value === "card" || value === "other" ? value : "bank_transfer";
 }
 
 function normalizeClient(client: Partial<Client>): Client {
@@ -131,6 +230,36 @@ function normalizeAttachments(attachments: unknown): DocumentAttachment[] {
   return attachments.map(normalizeAttachment).filter((attachment) => attachment.filePath);
 }
 
+function normalizePayment(payment: Partial<PaymentEntry>): PaymentEntry {
+  return {
+    id: payment.id || makeId("payment"),
+    amount: normalizeNumber(payment.amount, 0),
+    method: normalizePaymentMethod(payment.method),
+    paidAt: payment.paidAt || todayIso(),
+    note: payment.note || "",
+    createdAt: payment.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizePayments(payments: unknown): PaymentEntry[] {
+  if (!Array.isArray(payments)) return [];
+  return payments.map(normalizePayment).filter((payment) => payment.amount > 0);
+}
+
+function normalizeReminder(reminder: Partial<PaymentReminder>): PaymentReminder {
+  return {
+    id: reminder.id || makeId("reminder"),
+    sentAt: reminder.sentAt || todayIso(),
+    channel: reminder.channel === "phone" || reminder.channel === "letter" || reminder.channel === "other" ? reminder.channel : "email",
+    note: reminder.note || "",
+  };
+}
+
+function normalizeReminders(reminders: unknown): PaymentReminder[] {
+  if (!Array.isArray(reminders)) return [];
+  return reminders.map(normalizeReminder);
+}
+
 function normalizeSnapshot(snapshot: Partial<DocumentSnapshot>, defaultVatRate: number): DocumentSnapshot {
   const issueDate = snapshot.issueDate || todayIso();
   return {
@@ -149,6 +278,11 @@ function normalizeSnapshot(snapshot: Partial<DocumentSnapshot>, defaultVatRate: 
     terms: snapshot.terms || defaultCompany.paymentTerms,
     lines: normalizeLines(snapshot.lines, defaultVatRate),
     attachments: normalizeAttachments(snapshot.attachments),
+    depositPaidAmount: normalizeNumber(snapshot.depositPaidAmount, 0),
+    depositPaidAt: snapshot.depositPaidAt || "",
+    payments: normalizePayments(snapshot.payments),
+    paymentNotes: snapshot.paymentNotes || "",
+    reminders: normalizeReminders(snapshot.reminders),
     createdAt: snapshot.createdAt || new Date().toISOString(),
     updatedAt: snapshot.updatedAt || new Date().toISOString(),
   };
@@ -187,6 +321,11 @@ function normalizeDocument(doc: Partial<BusinessDocument>, defaultVatRate: numbe
     terms: doc.terms || defaultCompany.paymentTerms,
     lines: normalizeLines(doc.lines, defaultVatRate),
     attachments: normalizeAttachments(doc.attachments),
+    depositPaidAmount: normalizeNumber(doc.depositPaidAmount, 0),
+    depositPaidAt: doc.depositPaidAt || "",
+    payments: normalizePayments(doc.payments),
+    paymentNotes: doc.paymentNotes || "",
+    reminders: normalizeReminders(doc.reminders),
     history: normalizeHistory(doc.history, defaultVatRate),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || new Date().toISOString(),
@@ -210,14 +349,14 @@ function normalizeCatalogItem(item: Partial<CatalogItem>): CatalogItem {
     location: item.location || "",
     stockMovements: Array.isArray(item.stockMovements)
       ? item.stockMovements.map((movement) => ({
-        id: movement.id || makeId("stock"),
-        type: movement.type === "entry" || movement.type === "exit" ? movement.type : "adjustment",
-        quantity: normalizeNumber(movement.quantity, 0),
-        previousQuantity: normalizeNumber(movement.previousQuantity, 0),
-        nextQuantity: normalizeNumber(movement.nextQuantity, 0),
-        reason: movement.reason || "",
-        createdAt: movement.createdAt || new Date().toISOString(),
-      }))
+          id: movement.id || makeId("stock"),
+          type: movement.type === "entry" || movement.type === "exit" ? movement.type : "adjustment",
+          quantity: normalizeNumber(movement.quantity, 0),
+          previousQuantity: normalizeNumber(movement.previousQuantity, 0),
+          nextQuantity: normalizeNumber(movement.nextQuantity, 0),
+          reason: movement.reason || "",
+          createdAt: movement.createdAt || new Date().toISOString(),
+        }))
       : [],
   };
 }
@@ -236,8 +375,6 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     documents: Array.isArray(input?.documents)
       ? input.documents.map((doc) => normalizeDocument(doc, company.defaultVatRate))
       : fallback.documents,
-    catalog: Array.isArray(input?.catalog)
-      ? input.catalog.map(normalizeCatalogItem)
-      : fallback.catalog,
+    catalog: Array.isArray(input?.catalog) ? input.catalog.map(normalizeCatalogItem) : fallback.catalog,
   };
 }

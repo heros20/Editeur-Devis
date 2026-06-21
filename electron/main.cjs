@@ -2,16 +2,17 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, shell, net, Menu } = requ
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
+const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
 const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
 const appProtocol = "atelier";
+const localAuthCallbackPort = 43177;
 let mainWindow;
+let authCallbackServer;
 let pendingDeepLinkUrl = process.argv.find((arg) => arg.startsWith(`${appProtocol}://`)) || "";
-const portableDataRoot = process.env.PORTABLE_EXECUTABLE_DIR
-  ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, "Devix-data")
-  : "";
+const portableDataRoot = process.env.PORTABLE_EXECUTABLE_DIR ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, "Devix-data") : "";
 
 if (portableDataRoot) {
   app.setPath("userData", portableDataRoot);
@@ -71,8 +72,16 @@ function getDataPath() {
   return path.join(app.getPath("userData"), "atelier-du-bois-data.json");
 }
 
+function getAuthStoragePath() {
+  return path.join(app.getPath("userData"), "devix-auth-storage.json");
+}
+
 function getBackupRoot() {
   return path.join(app.getPath("userData"), "backups");
+}
+
+function getAttachmentsRoot() {
+  return path.join(app.getPath("userData"), "attachments");
 }
 
 function getOneDriveCandidates() {
@@ -86,11 +95,28 @@ function getOneDriveCandidates() {
 }
 
 function getAttachmentsDir(documentId) {
-  return path.join(app.getPath("userData"), "attachments", String(documentId || "documents"));
+  const safeDocumentId = String(documentId || "documents").replace(/[^a-zA-Z0-9_-]+/g, "-") || "documents";
+  return path.join(getAttachmentsRoot(), safeDocumentId);
 }
 
 function safeAttachmentName(fileName) {
   return path.basename(fileName || "piece-jointe").replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-");
+}
+
+function isPathInside(childPath, parentPath) {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolveSafeAttachmentPath(attachment) {
+  const rawPath = String(attachment?.filePath || "");
+  if (!rawPath) return "";
+  const resolved = path.resolve(rawPath);
+  const root = path.resolve(getAttachmentsRoot());
+  if (!isPathInside(resolved, root)) {
+    throw new Error("Chemin de piece jointe non autorise.");
+  }
+  return resolved;
 }
 
 function mimeFromFileName(fileName) {
@@ -221,6 +247,34 @@ async function writeStore(data) {
   return data;
 }
 
+async function readAuthStorage() {
+  try {
+    const raw = await fs.readFile(getAuthStoragePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    if (error?.code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+async function writeAuthStorage(data) {
+  const file = getAuthStoragePath();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(data, null, 2), "utf8");
+}
+
+let authStorageQueue = Promise.resolve();
+
+function withAuthStorageLock(task) {
+  const next = authStorageQueue.catch(() => undefined).then(task);
+  authStorageQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
 function makeNumber(prefix, count) {
   const year = new Date().getFullYear();
   return `${prefix}-${year}-${String(count).padStart(4, "0")}`;
@@ -233,7 +287,12 @@ function isAppDeepLink(value) {
 function loadAppUrl(targetUrl = "") {
   if (!mainWindow) return;
   if (isDev) {
-    mainWindow.loadURL("http://127.0.0.1:5173");
+    let devUrl = "http://127.0.0.1:5173";
+    if (isAppDeepLink(targetUrl)) {
+      const url = new URL(targetUrl);
+      devUrl += `${url.search || ""}${url.hash || ""}`;
+    }
+    mainWindow.loadURL(devUrl);
     return;
   }
   mainWindow.loadURL(isAppDeepLink(targetUrl) ? targetUrl : `${appProtocol}://app/index.html`);
@@ -246,6 +305,94 @@ function openDeepLink(targetUrl) {
   loadAppUrl(targetUrl);
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
+}
+
+function authCallbackHtml(message, details = "") {
+  return `<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connexion Devix</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: Arial, sans-serif;
+        color: #20332f;
+        background: #f6f3ee;
+      }
+      main {
+        width: min(520px, 100%);
+        display: grid;
+        gap: 12px;
+        padding: 24px;
+        border: 1px solid #ded5cb;
+        border-radius: 8px;
+        background: white;
+      }
+      h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+      p {
+        margin: 0;
+        color: #62564e;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${message}</h1>
+      ${details ? `<p>${details}</p>` : ""}
+      <p id="fallback" hidden>Vous pouvez fermer cette page.</p>
+    </main>
+    <script>
+      window.setTimeout(() => window.close(), 250);
+      window.setTimeout(() => {
+        const fallback = document.getElementById("fallback");
+        if (fallback) fallback.hidden = false;
+      }, 1400);
+    </script>
+  </body>
+</html>`;
+}
+
+function startAuthCallbackServer() {
+  if (authCallbackServer) return;
+
+  authCallbackServer = http.createServer((request, response) => {
+    const requestUrl = new URL(request.url || "/", `http://127.0.0.1:${localAuthCallbackPort}`);
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Cache-Control", "no-store");
+
+    if (requestUrl.pathname === "/ping") {
+      response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("ok");
+      return;
+    }
+
+    if (requestUrl.pathname !== "/auth-callback") {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Not found");
+      return;
+    }
+
+    const targetUrl = `${appProtocol}://app/index.html${requestUrl.search}`;
+    openDeepLink(targetUrl);
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(authCallbackHtml("Connexion terminee", "Retour dans Devix effectue. Fermeture de cette page..."));
+  });
+
+  authCallbackServer.on("error", (error) => {
+    console.warn("Callback OAuth local indisponible", error);
+  });
+
+  authCallbackServer.listen(localAuthCallbackPort, "127.0.0.1");
 }
 
 function createWindow() {
@@ -267,6 +414,11 @@ function createWindow() {
 
   if (!isDev) {
     mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      if (!details.url.startsWith(`${appProtocol}://`)) {
+        callback({});
+        return;
+      }
+
       callback({
         responseHeaders: {
           ...details.responseHeaders,
@@ -290,10 +442,15 @@ app.whenReady().then(() => {
   protocol.handle(appProtocol, (request) => {
     const url = new URL(request.url);
     const relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, "")) || "index.html";
-    const filePath = path.join(__dirname, "../dist", relativePath);
+    const distRoot = path.resolve(__dirname, "../dist");
+    const filePath = path.resolve(distRoot, relativePath);
+    if (!isPathInside(filePath, distRoot)) {
+      return new Response("Not found", { status: 404 });
+    }
     return net.fetch(pathToFileURL(filePath).toString());
   });
 
+  startAuthCallbackServer();
   createWindow();
 });
 
@@ -319,6 +476,32 @@ app.on("activate", () => {
 ipcMain.handle("store:load", async () => readStore());
 ipcMain.handle("store:save", async (_event, data) => writeStore(data));
 
+ipcMain.handle("auth-storage:get", async (_event, key) =>
+  withAuthStorageLock(async () => {
+    const storage = await readAuthStorage();
+    const value = storage[String(key || "")];
+    return typeof value === "string" ? value : null;
+  })
+);
+
+ipcMain.handle("auth-storage:set", async (_event, key, value) =>
+  withAuthStorageLock(async () => {
+    const storage = await readAuthStorage();
+    storage[String(key || "")] = String(value || "");
+    await writeAuthStorage(storage);
+    return { saved: true };
+  })
+);
+
+ipcMain.handle("auth-storage:remove", async (_event, key) =>
+  withAuthStorageLock(async () => {
+    const storage = await readAuthStorage();
+    delete storage[String(key || "")];
+    await writeAuthStorage(storage);
+    return { removed: true };
+  })
+);
+
 ipcMain.handle("store:next-number", async (_event, type) => {
   const data = await readStore();
   const prefixes = { quote: "DEV", order: "BC", invoice: "FAC", creditNote: "AVO", returnInvoice: "RET", client: "CLI" };
@@ -343,22 +526,36 @@ ipcMain.handle("app:open-email", async (_event, { to, subject, body }) => {
   return { opened: true };
 });
 
+ipcMain.handle("app:open-external", async (_event, targetUrl) => {
+  const url = String(targetUrl || "");
+  if (!/^https:\/\//i.test(url)) throw new Error("URL externe non autorisee.");
+  await shell.openExternal(url);
+  return { opened: true };
+});
+
 async function createPdfFile(html, filePath) {
+  const htmlPath = path.join(app.getPath("temp"), "devix", "pdf", `${crypto.randomUUID()}.html`);
   const pdfWindow = new BrowserWindow({
     show: false,
     width: 794,
     height: 1123,
-    webPreferences: { offscreen: true },
+    webPreferences: { offscreen: true, partition: `pdf-${crypto.randomUUID()}` },
   });
-  await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-  const pdf = await pdfWindow.webContents.printToPDF({
-    printBackground: true,
-    pageSize: "A4",
-    margins: { marginType: "none" },
-  });
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, pdf);
-  pdfWindow.close();
+  try {
+    await fs.mkdir(path.dirname(htmlPath), { recursive: true });
+    await fs.writeFile(htmlPath, html, "utf8");
+    await pdfWindow.loadURL(pathToFileURL(htmlPath).toString());
+    const pdf = await pdfWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: "A4",
+      margins: { marginType: "none" },
+    });
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, pdf);
+  } finally {
+    pdfWindow.close();
+    await fs.unlink(htmlPath).catch(() => undefined);
+  }
 }
 
 async function openOutlookDraft({ to, subject, body, attachmentPath }) {
@@ -519,15 +716,22 @@ ipcMain.handle("dialog:select-attachments", async (_event, documentId) => {
 });
 
 ipcMain.handle("app:open-attachment", async (_event, attachment) => {
-  if (!attachment?.filePath) return { opened: false };
-  const error = await shell.openPath(attachment.filePath);
-  return { opened: !error, error };
+  try {
+    const filePath = resolveSafeAttachmentPath(attachment);
+    if (!filePath) return { opened: false };
+    const error = await shell.openPath(filePath);
+    return { opened: !error, error };
+  } catch (error) {
+    console.warn("Ouverture piece jointe refusee", error);
+    return { opened: false, error: error?.message || "Ouverture refusee" };
+  }
 });
 
 ipcMain.handle("app:delete-attachment", async (_event, attachment) => {
-  if (!attachment?.filePath) return { deleted: false };
   try {
-    await fs.unlink(attachment.filePath);
+    const filePath = resolveSafeAttachmentPath(attachment);
+    if (!filePath) return { deleted: false };
+    await fs.unlink(filePath);
     return { deleted: true };
   } catch (error) {
     if (error?.code === "ENOENT") return { deleted: true };

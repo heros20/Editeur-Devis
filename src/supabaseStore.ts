@@ -1,18 +1,63 @@
 import { createClient, type Session } from "@supabase/supabase-js";
 import { createDefaultAppData, normalizeData } from "./defaultData";
+import { getAtelierApi } from "./runtimeApi";
 import type { AppData, DocumentAttachment, DocumentType } from "./types";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://srfaeqhepmogxsdiympq.supabase.co";
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_zjwJgUjvYlh6F_ltZOXEHQ_lbINP1L9";
+const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
+const supabaseKey = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
+const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 const configuredAuthRedirectUrl = String(import.meta.env.VITE_AUTH_REDIRECT_URL || "").trim();
 const attachmentsBucket = "document-attachments";
-const desktopRedirectUrl = "atelier://app/index.html";
+const desktopAuthBridgeUrl = supabaseConfigured ? `${supabaseUrl}/functions/v1/auth-callback` : "";
+const authStorageKey = supabaseConfigured ? `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token` : "sb-devix-auth-token";
+const clientUrl = supabaseConfigured ? supabaseUrl : "https://placeholder.supabase.co";
+const clientKey = supabaseConfigured ? supabaseKey : "missing-publishable-key";
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
+function assertSupabaseConfigured() {
+  if (!supabaseConfigured)
+    throw new Error("Configuration Supabase absente. Renseignez VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY.");
+}
+
+function createAuthStorage() {
+  const api = getAtelierApi();
+
+  return {
+    async getItem(key: string) {
+      const persisted = await api.authStorageGet(key).catch(() => null);
+      if (persisted) return persisted;
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    async setItem(key: string, value: string) {
+      await api.authStorageSet(key, value).catch(() => undefined);
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // Electron file storage is the primary desktop persistence layer.
+      }
+    },
+    async removeItem(key: string) {
+      await api.authStorageRemove(key).catch(() => undefined);
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Ignore localStorage cleanup errors.
+      }
+    },
+  };
+}
+
+export const supabase = createClient(clientUrl, clientKey, {
   auth: {
+    storage: createAuthStorage(),
+    storageKey: authStorageKey,
+    flowType: "pkce",
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   },
 });
 
@@ -24,6 +69,7 @@ export interface WorkspaceContext {
   organizationName: string;
   role: WorkspaceRole;
   userEmail: string;
+  workspaceUpdatedAt: string;
 }
 
 interface OrganizationRow {
@@ -39,6 +85,7 @@ interface MembershipRow {
 
 interface WorkspaceRow {
   data: Partial<AppData> | null;
+  updated_at: string;
 }
 
 interface CounterRow {
@@ -91,11 +138,20 @@ function assertRemoteError(error: unknown) {
 
 function authRedirectUrl() {
   if (configuredAuthRedirectUrl) return configuredAuthRedirectUrl;
-  if (window.location.protocol === "atelier:") return desktopRedirectUrl;
+  if (isDesktopRuntime()) return desktopAuthBridgeUrl;
   return window.location.origin;
 }
 
-function defaultWorkspaceData(organizationName: string) {
+function isDesktopRuntime() {
+  return Boolean(window.atelierApi) || window.location.protocol === "atelier:";
+}
+
+function cleanAuthUrl() {
+  const nextUrl = `${window.location.origin}${window.location.pathname}`;
+  window.history.replaceState({}, document.title, nextUrl);
+}
+
+function defaultWorkspaceData() {
   const fallback = createDefaultAppData();
   return normalizeData({
     ...fallback,
@@ -109,25 +165,57 @@ function defaultWorkspaceData(organizationName: string) {
 }
 
 export async function getCurrentSession() {
+  if (!supabaseConfigured) return null;
   const { data, error } = await supabase.auth.getSession();
   assertRemoteError(error);
   return data.session;
 }
 
+export async function completeOAuthRedirect() {
+  if (!supabaseConfigured) return null;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const errorDescription = params.get("error_description") || params.get("error");
+  if (errorDescription) {
+    cleanAuthUrl();
+    throw new Error(errorDescription);
+  }
+  if (!code) return null;
+
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  cleanAuthUrl();
+  assertRemoteError(error);
+  return data.session;
+}
+
 export function onRemoteAuthStateChange(callback: (session: Session | null) => void) {
+  if (!supabaseConfigured) return () => undefined;
   const { data } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
   return () => data.subscription.unsubscribe();
 }
 
 export async function signInWithPassword(email: string, password: string) {
+  assertSupabaseConfigured();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   assertRemoteError(error);
   return data.session;
 }
 
 export async function signUpWithPassword(email: string, password: string) {
+  assertSupabaseConfigured();
+  const cleanEmail = email.trim().toLowerCase();
+  const { data: availability, error: availabilityError } = await supabase.functions.invoke("check-email-availability", {
+    body: { email: cleanEmail },
+  });
+  assertRemoteError(availabilityError);
+  const availabilityPayload = availability as { available?: boolean; error?: string } | null;
+  if (availabilityPayload?.error) throw new Error(availabilityPayload.error);
+  if (availabilityPayload && availabilityPayload.available === false) {
+    throw new Error("Un compte existe deja avec cette adresse email. Connectez-vous ou utilisez mot de passe oublie.");
+  }
+
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: cleanEmail,
     password,
     options: {
       emailRedirectTo: authRedirectUrl(),
@@ -138,6 +226,7 @@ export async function signUpWithPassword(email: string, password: string) {
 }
 
 export async function sendPasswordSetupEmail(email: string) {
+  assertSupabaseConfigured();
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !cleanEmail.includes("@")) throw new Error("Email invalide");
   const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
@@ -147,6 +236,7 @@ export async function sendPasswordSetupEmail(email: string) {
 }
 
 export async function updateCurrentUserPassword(password: string) {
+  assertSupabaseConfigured();
   const nextPassword = password.trim();
   if (nextPassword.length < 8) throw new Error("Le mot de passe doit contenir au moins 8 caractères.");
   const { data, error } = await supabase.auth.updateUser({ password: nextPassword });
@@ -155,22 +245,29 @@ export async function updateCurrentUserPassword(password: string) {
 }
 
 export async function signInWithGoogle() {
+  assertSupabaseConfigured();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: authRedirectUrl(),
+      skipBrowserRedirect: isDesktopRuntime(),
     },
   });
   assertRemoteError(error);
+  if (isDesktopRuntime() && data.url) {
+    await getAtelierApi().openExternal(data.url);
+  }
   return data;
 }
 
 export async function signOutRemote() {
+  assertSupabaseConfigured();
   const { error } = await supabase.auth.signOut();
   assertRemoteError(error);
 }
 
 export async function deleteCurrentAccount() {
+  assertSupabaseConfigured();
   const { data, error } = await supabase.functions.invoke("delete-account", {
     body: { confirmation: "SUPPRIMER" },
   });
@@ -190,11 +287,7 @@ async function claimPendingInvitation() {
 }
 
 async function getOrganization(organizationId: string) {
-  const { data, error } = await supabase
-    .from("organizations")
-    .select("id, name")
-    .eq("id", organizationId)
-    .single<OrganizationRow>();
+  const { data, error } = await supabase.from("organizations").select("id, name").eq("id", organizationId).single<OrganizationRow>();
   assertRemoteError(error);
   if (!data) throw new Error("Entreprise introuvable");
   return data;
@@ -202,9 +295,7 @@ async function getOrganization(organizationId: string) {
 
 async function createOrganization(session: Session) {
   const defaultName = "Nouvelle entreprise";
-  const { error } = await supabase
-    .from("organizations")
-    .insert({ name: defaultName, created_by: session.user.id });
+  const { error } = await supabase.from("organizations").insert({ name: defaultName, created_by: session.user.id });
   assertRemoteError(error);
 
   const membership = await getFirstMembership(session.user.id);
@@ -251,12 +342,12 @@ function mapTeamInvitation(row: TeamInvitationRow): TeamInvitation {
 async function getWorkspaceData(organization: OrganizationRow) {
   const { data, error } = await supabase
     .from("organization_workspaces")
-    .select("data")
+    .select("data, updated_at")
     .eq("organization_id", organization.id)
     .maybeSingle<WorkspaceRow>();
   assertRemoteError(error);
 
-  const workspaceData = data?.data && Object.keys(data.data).length ? normalizeData(data.data) : defaultWorkspaceData(organization.name);
+  const workspaceData = data?.data && Object.keys(data.data).length ? normalizeData(data.data) : defaultWorkspaceData();
   const { data: counters, error: countersError } = await supabase
     .from("organization_counters")
     .select("counter_type, next_value")
@@ -264,26 +355,35 @@ async function getWorkspaceData(organization: OrganizationRow) {
     .returns<CounterRow[]>();
   assertRemoteError(countersError);
 
-  if (!counters?.length) return workspaceData;
-  return normalizeData({
-    ...workspaceData,
-    counters: counters.reduce(
-      (acc, row) => ({
-        ...acc,
-        [row.counter_type]: row.next_value,
-      }),
-      workspaceData.counters
-    ),
-  });
+  const normalized = !counters?.length
+    ? workspaceData
+    : normalizeData({
+        ...workspaceData,
+        counters: counters.reduce(
+          (acc, row) => ({
+            ...acc,
+            [row.counter_type]: row.next_value,
+          }),
+          workspaceData.counters
+        ),
+      });
+
+  return {
+    data: normalized,
+    updatedAt: data?.updated_at || "",
+  };
 }
 
 export async function loadRemoteWorkspace(preferredOrganizationId?: string) {
+  assertSupabaseConfigured();
   const session = await getCurrentSession();
   if (!session) throw new Error("Session absente");
 
   const invitedOrganizationId = preferredOrganizationId ? "" : await claimPendingInvitation();
   const targetOrganizationId = preferredOrganizationId || invitedOrganizationId;
-  let membership = targetOrganizationId ? await getMembership(targetOrganizationId, session.user.id) : await getFirstMembership(session.user.id);
+  let membership = targetOrganizationId
+    ? await getMembership(targetOrganizationId, session.user.id)
+    : await getFirstMembership(session.user.id);
   let organization: OrganizationRow;
 
   if (!membership) {
@@ -293,18 +393,20 @@ export async function loadRemoteWorkspace(preferredOrganizationId?: string) {
     organization = await getOrganization(membership.organization_id);
   }
 
-  const data = await getWorkspaceData(organization);
+  const workspaceData = await getWorkspaceData(organization);
   const context: WorkspaceContext = {
     organizationId: organization.id,
     organizationName: organization.name,
     role: membership.role,
     userEmail: session.user.email || membership.email || "",
+    workspaceUpdatedAt: workspaceData.updatedAt,
   };
 
-  return { context, data };
+  return { context, data: workspaceData.data };
 }
 
 export async function listTeamMembers(context: WorkspaceContext) {
+  assertSupabaseConfigured();
   const session = await getCurrentSession();
   if (!session) throw new Error("Session absente");
 
@@ -330,6 +432,7 @@ export async function listTeamMembers(context: WorkspaceContext) {
 }
 
 export async function listTeamInvitations(context: WorkspaceContext) {
+  assertSupabaseConfigured();
   const { data, error } = await supabase
     .from("organization_invitations")
     .select("id, email, role, token, accepted_at, expires_at, created_at")
@@ -343,6 +446,7 @@ export async function listTeamInvitations(context: WorkspaceContext) {
 }
 
 export async function createTeamInvitation(context: WorkspaceContext, email: string, role: InviteRole) {
+  assertSupabaseConfigured();
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !cleanEmail.includes("@")) throw new Error("Email invalide");
 
@@ -362,6 +466,7 @@ export async function createTeamInvitation(context: WorkspaceContext, email: str
 }
 
 export async function deleteTeamInvitation(context: WorkspaceContext, invitationId: string) {
+  assertSupabaseConfigured();
   const { error } = await supabase
     .from("organization_invitations")
     .delete()
@@ -371,6 +476,7 @@ export async function deleteTeamInvitation(context: WorkspaceContext, invitation
 }
 
 export async function updateTeamMemberRole(context: WorkspaceContext, memberId: string, role: InviteRole) {
+  assertSupabaseConfigured();
   const { error } = await supabase
     .from("organization_members")
     .update({ role })
@@ -380,35 +486,48 @@ export async function updateTeamMemberRole(context: WorkspaceContext, memberId: 
 }
 
 export async function removeTeamMember(context: WorkspaceContext, memberId: string) {
-  const { error } = await supabase
-    .from("organization_members")
-    .delete()
-    .eq("organization_id", context.organizationId)
-    .eq("id", memberId);
+  assertSupabaseConfigured();
+  const { error } = await supabase.from("organization_members").delete().eq("organization_id", context.organizationId).eq("id", memberId);
   assertRemoteError(error);
 }
 
 export async function saveRemoteWorkspace(context: WorkspaceContext, data: AppData) {
+  assertSupabaseConfigured();
   const normalized = normalizeData(data);
   const nextName = normalized.company.name.trim() || context.organizationName;
   const { data: sessionData } = await supabase.auth.getSession();
   const updatedBy = sessionData.session?.user.id;
 
-  if (nextName && nextName !== context.organizationName) {
-    const { error } = await supabase.from("organizations").update({ name: nextName }).eq("id", context.organizationId);
-    assertRemoteError(error);
+  let query = supabase
+    .from("organization_workspaces")
+    .update({
+      data: normalized,
+      updated_by: updatedBy,
+    })
+    .eq("organization_id", context.organizationId);
+
+  if (context.workspaceUpdatedAt) {
+    query = query.eq("updated_at", context.workspaceUpdatedAt);
   }
 
-  const { error } = await supabase.from("organization_workspaces").upsert({
-    organization_id: context.organizationId,
-    data: normalized,
-    updated_by: updatedBy,
-  });
+  const { data: updatedRows, error } = await query.select("updated_at").returns<{ updated_at: string }[]>();
   assertRemoteError(error);
-  return { ...context, organizationName: nextName };
+
+  const updatedAt = updatedRows?.[0]?.updated_at;
+  if (!updatedAt) {
+    throw new Error("Les données ont été modifiées ailleurs. Rechargez l'espace avant d'enregistrer.");
+  }
+
+  if (nextName && nextName !== context.organizationName) {
+    const { error: organizationError } = await supabase.from("organizations").update({ name: nextName }).eq("id", context.organizationId);
+    assertRemoteError(organizationError);
+  }
+
+  return { ...context, organizationName: nextName, workspaceUpdatedAt: updatedAt };
 }
 
 export async function reserveRemoteCounter(context: WorkspaceContext, type: DocumentType | "client") {
+  assertSupabaseConfigured();
   const { data, error } = await supabase.rpc("reserve_business_number", {
     target_organization_id: context.organizationId,
     target_counter_type: type,
@@ -450,6 +569,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 }
 
 export async function uploadRemoteAttachment(context: WorkspaceContext, documentId: string, attachment: DocumentAttachment) {
+  assertSupabaseConfigured();
   const dataUrl = attachmentDataUrl(attachment);
   if (!dataUrl) throw new Error("Lecture de la pièce jointe impossible");
 
@@ -473,6 +593,7 @@ export async function uploadRemoteAttachment(context: WorkspaceContext, document
 }
 
 export async function openRemoteAttachment(attachment: DocumentAttachment) {
+  assertSupabaseConfigured();
   const path = attachment.storagePath || attachment.filePath;
   if (!path) throw new Error("Pièce jointe introuvable");
   const { data, error } = await supabase.storage.from(attachmentsBucket).download(path);
@@ -482,9 +603,9 @@ export async function openRemoteAttachment(attachment: DocumentAttachment) {
 }
 
 export async function deleteRemoteAttachment(attachment: DocumentAttachment) {
+  assertSupabaseConfigured();
   const path = attachment.storagePath || attachment.filePath;
   if (!path) return;
   const { error } = await supabase.storage.from(attachmentsBucket).remove([path]);
   assertRemoteError(error);
 }
-

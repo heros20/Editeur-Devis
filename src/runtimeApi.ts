@@ -10,7 +10,17 @@ export interface AtelierApi {
   savePdf: (payload: { html: string; defaultPath: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   exportJson: (data: AppData) => Promise<{ canceled: boolean; filePath?: string }>;
   openEmail: (payload: { to?: string; subject: string; body: string }) => Promise<{ opened: boolean }>;
-  emailPdf: (payload: { html: string; defaultPath: string; to?: string; subject: string; body: string }) => Promise<{ opened: boolean; filePath?: string; fallback?: boolean }>;
+  openExternal: (url: string) => Promise<{ opened: boolean }>;
+  authStorageGet: (key: string) => Promise<string | null>;
+  authStorageSet: (key: string, value: string) => Promise<{ saved: boolean }>;
+  authStorageRemove: (key: string) => Promise<{ removed: boolean }>;
+  emailPdf: (payload: {
+    html: string;
+    defaultPath: string;
+    to?: string;
+    subject: string;
+    body: string;
+  }) => Promise<{ opened: boolean; filePath?: string; fallback?: boolean }>;
   selectAttachments: (documentId: string) => Promise<{ canceled: boolean; attachments: DocumentAttachment[] }>;
   openAttachment: (attachment: DocumentAttachment) => Promise<{ opened: boolean }>;
   deleteAttachment: (attachment: DocumentAttachment) => Promise<{ deleted: boolean }>;
@@ -121,9 +131,33 @@ const browserApi: AtelierApi = {
     window.location.href = mailtoUrl(payload);
     return { opened: true };
   },
+  async openExternal(url) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return { opened: true };
+  },
+  async authStorageGet(key) {
+    return localStorage.getItem(key);
+  },
+  async authStorageSet(key, value) {
+    localStorage.setItem(key, value);
+    return { saved: true };
+  },
+  async authStorageRemove(key) {
+    localStorage.removeItem(key);
+    return { removed: true };
+  },
   async emailPdf(payload) {
     console.warn("Les pieces jointes PDF necessitent l'application de bureau.");
-    return { opened: false, filePath: payload.defaultPath, fallback: true };
+    const printWindow = window.open("", "_blank", "width=920,height=1100");
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(payload.html);
+      printWindow.document.close();
+      printWindow.focus();
+      window.setTimeout(() => printWindow.print(), 250);
+    }
+    window.location.href = mailtoUrl(payload);
+    return { opened: true, filePath: payload.defaultPath, fallback: true };
   },
   async selectAttachments() {
     const files = await chooseFiles();
