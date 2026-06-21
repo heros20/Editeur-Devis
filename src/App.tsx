@@ -1,10 +1,12 @@
 import {
   ArrowLeft,
+  Building2,
   Check,
   ChevronRight,
   Clipboard,
   CopyPlus,
   Download,
+  Eye,
   ExternalLink,
   FileCheck2,
   FileText,
@@ -15,9 +17,11 @@ import {
   LogOut,
   Mail,
   PackageCheck,
+  Palette,
   Paperclip,
   Plus,
   ReceiptText,
+  Save,
   Search,
   Settings,
   Trash2,
@@ -25,12 +29,13 @@ import {
   Users,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { applyDocumentStockImpact, creditLines, makeDocumentSnapshot } from "./businessLogic";
 import { createDefaultAppData, normalizeData } from "./defaultData";
 import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { buildPaymentReminderEmail } from "./reminderEmail";
 import { getAtelierApi } from "./runtimeApi";
+import { devixThemes, getTheme, themeCssVariables, type ThemeId } from "./themes";
 import {
   completeOAuthRedirect,
   createTeamInvitation,
@@ -95,10 +100,11 @@ import {
   withPaymentStatus,
 } from "./utils";
 
-type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients" | "settings";
+type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients" | "company" | "settings";
 type AuthMode = "signin" | "signup";
 type ReminderDraft = Pick<PaymentReminder, "sentAt" | "channel" | "note">;
 type ReminderSendResult = { success: boolean; message: string };
+type DocumentSaveState = "saved" | "dirty" | "saving" | "error";
 
 const roleLabels: Record<WorkspaceRole, string> = {
   owner: "Propriétaire",
@@ -114,6 +120,10 @@ function normalizeSearch(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+function confirmDestructiveAction(message: string) {
+  return window.confirm(`${message}\n\nConfirmez-vous cette action ?`);
 }
 
 function formatPhoneNumber(value = "") {
@@ -212,6 +222,17 @@ export function App() {
   const [accountPassword, setAccountPassword] = useState("");
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
+  const [documentSaveState, setDocumentSaveState] = useState<DocumentSaveState>("saved");
+
+  useEffect(() => {
+    if (documentSaveState !== "dirty" && documentSaveState !== "error") return;
+    const warnBeforeClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeClose);
+    return () => window.removeEventListener("beforeunload", warnBeforeClose);
+  }, [documentSaveState]);
 
   function userFacingError(error: unknown, fallback: string) {
     const raw = error instanceof Error ? error.message : String((error as { message?: string })?.message || "");
@@ -291,10 +312,10 @@ export function App() {
     };
   }, [api]);
 
-  async function persist(next: AppData, message = "Enregistré") {
+  async function persist(next: AppData, message = "Enregistré", showSuccessNotice = true) {
     if (!canEditOperations) {
       showPermissionNotice("Votre accès est en lecture seule.");
-      return;
+      return false;
     }
     const previous = data;
     const normalized = normalizeData(next);
@@ -306,13 +327,17 @@ export function App() {
       } else {
         await api.saveStore(normalized);
       }
-      setNotice(message);
+      setDocumentSaveState("saved");
+      if (showSuccessNotice) setNotice(message);
+      return true;
     } catch (error) {
       console.error("Impossible d'enregistrer les données", error);
       setData(previous);
       setNotice(userFacingError(error, "Sauvegarde indisponible"));
+      return false;
+    } finally {
+      window.setTimeout(() => setNotice(""), 1800);
     }
-    window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function reserveNumber(type: DocumentType | "client", source: AppData) {
@@ -548,7 +573,8 @@ export function App() {
 
   useEffect(() => {
     if (view === "catalog" && !canManageCatalog) setView("documents");
-  }, [canManageCatalog, view]);
+    if (view === "company" && !canViewCompanySettings) setView("settings");
+  }, [canManageCatalog, canViewCompanySettings, view]);
 
   async function refreshTeam() {
     if (!workspace) {
@@ -723,6 +749,7 @@ export function App() {
 
   async function revokeInvitation(invitation: TeamInvitation) {
     if (!workspace || !canManageTeam || teamBusy) return;
+    if (!confirmDestructiveAction(`Supprimer l'invitation envoyée à ${invitation.email} ?`)) return;
     setTeamBusy(true);
     try {
       await deleteTeamInvitation(workspace, invitation.id);
@@ -755,6 +782,7 @@ export function App() {
 
   async function deleteMember(member: TeamMember) {
     if (!workspace || !canManageTeam || teamBusy || member.role === "owner" || member.isCurrentUser) return;
+    if (!confirmDestructiveAction(`Retirer ${member.email || "ce membre"} de l'entreprise ?`)) return;
     setTeamBusy(true);
     try {
       await removeTeamMember(workspace, member.id);
@@ -784,9 +812,10 @@ export function App() {
     if (view === "documents") return "Devis, BC et factures";
     if (view === "documentDetail" && selectedDoc) return `${labels[selectedDoc.type]} ${selectedDoc.number}`;
     if (view === "documentDetail") return "Document";
-    if (view === "catalog") return "Articles et prestations";
+    if (view === "catalog") return "Catalogue";
     if (view === "clients") return "Dossiers clients";
-    return canViewCompanySettings ? "Paramètres société" : "Mon compte";
+    if (view === "company") return "Informations société";
+    return "Paramètres";
   }
 
   const filteredDocuments = sortedDocuments
@@ -946,7 +975,16 @@ export function App() {
       return;
     }
     const updated = withPaymentStatus({ ...doc, updatedAt: new Date().toISOString() });
-    await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) });
+    setData(normalizeData({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }));
+    setDocumentSaveState("dirty");
+  }
+
+  async function saveDocument(doc: BusinessDocument) {
+    if (!canModifyDocument(doc) || documentSaveState === "saving") return;
+    setDocumentSaveState("saving");
+    const updated = withPaymentStatus({ ...doc, updatedAt: new Date().toISOString() });
+    const saved = await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }, "", false);
+    setDocumentSaveState(saved ? "saved" : "error");
   }
 
   async function updateDocumentPayment(doc: BusinessDocument) {
@@ -1040,6 +1078,7 @@ export function App() {
       showPermissionNotice("Ce document de facturation est verrouillé. Revenez au document précédent avant de le supprimer.");
       return;
     }
+    if (!confirmDestructiveAction(`Supprimer ${labels[doc.type].toLowerCase()} ${doc.number} ?`)) return;
     const lastHistory = doc.history[doc.history.length - 1];
     const shouldRestoreOrigin = Boolean(
       lastHistory &&
@@ -1100,6 +1139,7 @@ export function App() {
       );
       return;
     }
+    if (!confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
     try {
       if (workspace) {
         await deleteRemoteAttachment(attachment);
@@ -1236,6 +1276,7 @@ export function App() {
       setNotice("Client utilisé dans un document");
       return;
     }
+    if (!confirmDestructiveAction(`Supprimer le client « ${client.name || client.number} » ?`)) return;
     await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimé");
     if (selectedClientId === client.id) setSelectedClientId("");
   }
@@ -1268,7 +1309,7 @@ export function App() {
       showPermissionNotice();
       return;
     }
-    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Article ajouté");
+    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Élément ajouté au catalogue");
     setView("catalog");
   }
 
@@ -1285,7 +1326,8 @@ export function App() {
       showPermissionNotice();
       return;
     }
-    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Article supprimé");
+    if (!confirmDestructiveAction(`Supprimer « ${item.name || "cet élément"} » du catalogue ?`)) return;
+    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Élément supprimé du catalogue");
   }
 
   async function copyCompany() {
@@ -1376,11 +1418,14 @@ export function App() {
       showPermissionNotice();
       return;
     }
+    if (!confirmDestructiveAction("Retirer le logo de l'entreprise ?")) return;
     await persist({ ...data, company: { ...data.company, logoDataUrl: "" } }, "Logo supprimé");
   }
 
+  const activeTheme = getTheme(data.company.themeId);
+
   return (
-    <div className="shell">
+    <div className="shell" style={themeCssVariables(activeTheme) as CSSProperties}>
       <aside className="sidebar">
         <div className="brandMark">
           <div className="logo">{data.company.logoDataUrl ? <img src={data.company.logoDataUrl} alt="" /> : "DV"}</div>
@@ -1403,19 +1448,24 @@ export function App() {
           >
             <FileText size={18} /> Documents
           </button>
-          {canManageCatalog && (
-            <button className={view === "catalog" ? "active nested" : "nested"} onClick={() => setView("catalog")}>
-              <PackageCheck size={18} /> Articles
-            </button>
-          )}
           <button
             className={view === "clients" || (view === "documentDetail" && documentBackView === "clients") ? "active" : ""}
             onClick={() => setView("clients")}
           >
             <Users size={18} /> Clients
           </button>
+          {canManageCatalog && (
+            <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>
+              <PackageCheck size={18} /> Catalogue
+            </button>
+          )}
+          {canViewCompanySettings && (
+            <button className={view === "company" ? "active" : ""} onClick={() => setView("company")}>
+              <Building2 size={18} /> Société
+            </button>
+          )}
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
-            <Settings size={18} /> {canViewCompanySettings ? "Société" : "Compte"}
+            <Settings size={18} /> Paramètres
           </button>
         </nav>
         <div className="quickActions">
@@ -1443,7 +1493,7 @@ export function App() {
           )}
           {canManageCatalog && (
             <button onClick={() => setView("catalog")}>
-              <PackageCheck size={17} /> Articles
+              <PackageCheck size={17} /> Catalogue
             </button>
           )}
         </div>
@@ -1627,6 +1677,8 @@ export function App() {
                 canCreateCreditNote={canConvertDocument(selectedDoc, "creditNote")}
                 canCreateReturnInvoice={canConvertDocument(selectedDoc, "returnInvoice")}
                 onChange={updateDocument}
+                onSave={saveDocument}
+                saveState={documentSaveState}
                 onPaymentChange={updateDocumentPayment}
                 onDelete={deleteDocument}
                 onExport={exportPdf}
@@ -1739,7 +1791,7 @@ export function App() {
           </section>
         )}
 
-        {view === "settings" && (
+        {view === "company" && (
           <section className="settingsPanel">
             {canViewCompanySettings && (
               <>
@@ -1776,47 +1828,40 @@ export function App() {
                     )}
                   </div>
                 </div>
-                <FormGrid
-                  value={data.company}
+                <CompanySettingsEditor
+                  company={data.company}
                   readOnly={!canManageCompany}
-                  onChange={(company) => persist({ ...data, company })}
-                  fields={[
-                    ["name", "Nom commercial", "text", "Votre société"],
-                    ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
-                    ["siret", "SIRET", "text", "123 456 789 00010"],
-                    ["vatNumber", "N° TVA", "text", "FR..."],
-                    ["address", "Adresse", "text", "12 rue des Copeaux"],
-                    ["postalCode", "Code postal", "text", "75000"],
-                    ["city", "Ville", "text", "Paris"],
-                    ["phone", "Téléphone", "text", "01 23 45 67 89"],
-                    ["email", "Email", "text", "contact@societe.fr"],
-                    ["website", "Site web", "text", "https://..."],
-                    ["iban", "IBAN", "text", "FR76..."],
-                    ["bic", "BIC", "text", "ABCDEFGH"],
-                    ["quoteValidityDays", "Validité devis (jours)", "number", "30"],
-                    ["defaultVatRate", "TVA par défaut", "number", "20"],
-                    ["defaultDepositRate", "Acompte par défaut", "number", "30"],
-                  ]}
+                  onSave={(company) => persist({ ...data, company }, "", false)}
                 />
-                <label className="fullLabel">
-                  Conditions de paiement
-                  <textarea
-                    disabled={!canManageCompany}
-                    placeholder="Ex. : 30 % d'acompte à la commande..."
-                    value={data.company.paymentTerms}
-                    onChange={(event) => persist({ ...data, company: { ...data.company, paymentTerms: event.target.value } })}
-                  />
-                </label>
-                <label className="fullLabel">
-                  Note par défaut
-                  <textarea
-                    disabled={!canManageCompany}
-                    placeholder="Note affichée sur les nouveaux documents"
-                    value={data.company.notes}
-                    onChange={(event) => persist({ ...data, company: { ...data.company, notes: event.target.value } })}
-                  />
-                </label>
               </>
+            )}
+          </section>
+        )}
+
+        {view === "settings" && (
+          <section className="settingsPanel preferencesPanel">
+            <ThemeSettings
+              currentThemeId={data.company.themeId}
+              readOnly={!canManageCompany}
+              onSave={(themeId) => persist({ ...data, company: { ...data.company, themeId } }, "Thème enregistré")}
+            />
+            {workspace && canManageTeam && (
+              <TeamSettings
+                workspace={workspace}
+                members={teamMembers}
+                invitations={teamInvitations}
+                canManage={canManageTeam}
+                busy={teamBusy}
+                inviteEmail={inviteEmail}
+                inviteRole={inviteRole}
+                onInviteEmailChange={setInviteEmail}
+                onInviteRoleChange={setInviteRole}
+                onSubmitInvitation={submitInvitation}
+                onRevokeInvitation={revokeInvitation}
+                onChangeMemberRole={changeMemberRole}
+                onDeleteMember={deleteMember}
+                onRefresh={refreshTeam}
+              />
             )}
             {workspace && (
               <AccountPasswordSettings
@@ -1843,24 +1888,6 @@ export function App() {
                 onSubmit={submitAuth}
                 onGoogleAuth={submitGoogleAuth}
                 onPasswordSetup={requestPasswordSetup}
-              />
-            )}
-            {workspace && canManageTeam && (
-              <TeamSettings
-                workspace={workspace}
-                members={teamMembers}
-                invitations={teamInvitations}
-                canManage={canManageTeam}
-                busy={teamBusy}
-                inviteEmail={inviteEmail}
-                inviteRole={inviteRole}
-                onInviteEmailChange={setInviteEmail}
-                onInviteRoleChange={setInviteRole}
-                onSubmitInvitation={submitInvitation}
-                onRevokeInvitation={revokeInvitation}
-                onChangeMemberRole={changeMemberRole}
-                onDeleteMember={deleteMember}
-                onRefresh={refreshTeam}
               />
             )}
           </section>
@@ -1993,6 +2020,95 @@ function LocalAccountSettings({
         onGoogleAuth={onGoogleAuth}
         onPasswordSetup={onPasswordSetup}
       />
+    </section>
+  );
+}
+
+function ThemeSettings({
+  currentThemeId,
+  readOnly,
+  onSave,
+}: {
+  currentThemeId: ThemeId;
+  readOnly: boolean;
+  onSave: (themeId: ThemeId) => Promise<boolean>;
+}) {
+  const [selectedThemeId, setSelectedThemeId] = useState(currentThemeId);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const saveLock = useRef(false);
+
+  useEffect(() => setSelectedThemeId(currentThemeId), [currentThemeId]);
+
+  async function applyTheme() {
+    if (readOnly || saveLock.current || selectedThemeId === currentThemeId) return;
+    saveLock.current = true;
+    setSaving(true);
+    setSaved(false);
+    const success = await onSave(selectedThemeId);
+    setSaving(false);
+    saveLock.current = false;
+    if (!success) return;
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1800);
+  }
+
+  return (
+    <section className="preferenceSection themeSection">
+      <div className="preferenceTitle">
+        <div className="preferenceIcon">
+          <Palette size={20} />
+        </div>
+        <div>
+          <span className="eyebrow">Apparence</span>
+          <h2>Thème</h2>
+          <p>La palette choisie s’applique à Devix et à tous les PDF générés.</p>
+        </div>
+      </div>
+      <div className="themeGrid" role="radiogroup" aria-label="Thème de couleur">
+        {devixThemes.map((theme) => {
+          const selected = selectedThemeId === theme.id;
+          return (
+            <button
+              key={theme.id}
+              type="button"
+              className={`themeOption${selected ? " selected" : ""}`}
+              disabled={readOnly || saving}
+              role="radio"
+              aria-checked={selected}
+              onClick={() => {
+                setSelectedThemeId(theme.id);
+                setSaved(false);
+              }}
+            >
+              <span className="themePreview" style={{ background: theme.colors.background }}>
+                <i style={{ background: theme.colors.sidebar }} />
+                <b style={{ background: theme.colors.primary }} />
+                <em style={{ background: theme.colors.accent }} />
+              </span>
+              <span className="themeOptionText">
+                <strong>{theme.name}</strong>
+                <small>{theme.description}</small>
+              </span>
+              {selected && <Check size={18} className="themeCheck" />}
+            </button>
+          );
+        })}
+      </div>
+      <div className="themeActions">
+        {readOnly && <span className="preferenceHint">Seuls les administrateurs peuvent modifier le thème de l’entreprise.</span>}
+        {saved && (
+          <span className="inlineSaveConfirmation">
+            <Check size={16} /> Thème enregistré
+          </span>
+        )}
+        {!readOnly && (
+          <button type="button" disabled={saving || selectedThemeId === currentThemeId} onClick={() => void applyTheme()}>
+            {saving ? <LoaderCircle className="spinIcon" size={17} /> : <Palette size={17} />}
+            {saving ? "Application…" : "Appliquer le thème"}
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -2302,6 +2418,8 @@ function DocumentEditor({
   canCreateCreditNote,
   canCreateReturnInvoice,
   onChange,
+  onSave,
+  saveState,
   onPaymentChange,
   onDelete,
   onExport,
@@ -2325,6 +2443,8 @@ function DocumentEditor({
   canCreateCreditNote: boolean;
   canCreateReturnInvoice: boolean;
   onChange: (doc: BusinessDocument) => void;
+  onSave: (doc: BusinessDocument) => void;
+  saveState: DocumentSaveState;
   onPaymentChange: (doc: BusinessDocument) => void;
   onDelete: (doc: BusinessDocument) => void;
   onExport: (doc: BusinessDocument) => void;
@@ -2340,6 +2460,7 @@ function DocumentEditor({
   onRemoveAttachment: (doc: BusinessDocument, attachment: DocumentAttachment) => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [reminderSending, setReminderSending] = useState(false);
   const [reminderMessage, setReminderMessage] = useState("");
@@ -2369,6 +2490,10 @@ function DocumentEditor({
   const patchPayment = (partial: Partial<BusinessDocument>) => onPaymentChange({ ...doc, ...partial });
   const patchLine = (id: string, partial: Partial<LineItem>) =>
     patch({ lines: doc.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
+  const removeLine = (line: LineItem) => {
+    if (!confirmDestructiveAction(`Supprimer la ligne « ${line.description || "sans désignation"} » ?`)) return;
+    patch({ lines: doc.lines.filter((item) => item.id !== line.id) });
+  };
   const savedDepositAmount = Number(doc.depositPaidAmount) || 0;
   const savedDepositDate = savedDepositAmount > 0 ? doc.depositPaidAt || "" : "";
   const depositDraftAmount = depositDraft.amount.trim() ? Number(depositDraft.amount) : 0;
@@ -2404,6 +2529,8 @@ function DocumentEditor({
   };
   const removePayment = (paymentId: string) => {
     if (!canEditPayments) return;
+    const payment = (doc.payments || []).find((entry) => entry.id === paymentId);
+    if (!confirmDestructiveAction(`Supprimer le règlement${payment ? ` de ${currency(payment.amount)}` : ""} ?`)) return;
     patchPayment({ payments: (doc.payments || []).filter((payment) => payment.id !== paymentId) });
   };
   const addReminder = async () => {
@@ -2439,6 +2566,8 @@ function DocumentEditor({
   };
   const removeReminder = (reminderId: string) => {
     if (!canEditPayments) return;
+    const reminder = (doc.reminders || []).find((entry) => entry.id === reminderId);
+    if (!confirmDestructiveAction(`Supprimer la relance${reminder ? ` du ${formatShortDate(reminder.sentAt)}` : ""} ?`)) return;
     patchPayment({ reminders: (doc.reminders || []).filter((reminder) => reminder.id !== reminderId) });
   };
 
@@ -2461,334 +2590,426 @@ function DocumentEditor({
 
   return (
     <article className="editor">
-      <div className="editorHeader">
-        <div>
-          <span className="eyebrow">{labels[doc.type]}</span>
-          <h2>{doc.number}</h2>
+      <div className="editorHeader editorActionBar">
+        <div className="documentState">
+          <span className="eyebrow">État du document</span>
+          <StatusBadge status={doc.status} />
+          <span className={`documentSaveStatus ${saveState}`}>
+            {saveState === "dirty"
+              ? "Modifications non enregistrées"
+              : saveState === "saving"
+                ? "Enregistrement…"
+                : saveState === "error"
+                  ? "Sauvegarde impossible"
+                  : "Enregistré"}
+          </span>
         </div>
         <div className="editorActions">
-          {!readOnly && (
-            <button className="ghost" onClick={() => onDuplicate(doc)}>
-              <CopyPlus size={17} /> Dupliquer
+          <div className="editorActionGroup primaryActions">
+            {!readOnly && (
+              <button
+                className={saveState === "dirty" || saveState === "error" ? "saveDocumentButton pending" : "saveDocumentButton"}
+                disabled={saveState === "saved" || saveState === "saving"}
+                onClick={() => onSave(doc)}
+              >
+                {saveState === "saving" ? <LoaderCircle className="spinIcon" size={17} /> : <Save size={17} />}
+                {saveState === "saving" ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            )}
+            {!readOnly && doc.type === "quote" && (
+              <button onClick={() => onConvert(doc, "order")}>
+                <PackageCheck size={17} /> Transformer en BC
+              </button>
+            )}
+            {!readOnly && doc.type === "order" && (
+              <button onClick={() => onConvert(doc, "invoice")}>
+                <ReceiptText size={17} /> Facturer
+              </button>
+            )}
+            {canCreateCreditNote && (
+              <button onClick={() => onConvert(doc, "creditNote")}>
+                <ReceiptText size={17} /> Avoir
+              </button>
+            )}
+            {canCreateReturnInvoice && (
+              <button onClick={() => onConvert(doc, "returnInvoice")}>
+                <PackageCheck size={17} /> Retour
+              </button>
+            )}
+            {canEditPayments && doc.status !== "paid" && (
+              <button onClick={() => onAdvanceStatus(doc)}>
+                <Check size={17} /> {quickStatusLabel}
+              </button>
+            )}
+          </div>
+          <div className="editorActionGroup outputActions">
+            <button onClick={() => onExport(doc)}>
+              <Download size={17} /> PDF
             </button>
-          )}
-          {canEditPayments && doc.status !== "paid" && (
-            <button onClick={() => onAdvanceStatus(doc)}>
-              <Check size={17} /> {quickStatusLabel}
+            <button className="ghost" disabled={emailing} onClick={sendEmail}>
+              {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
+              {emailing ? "Préparation..." : "Email"}
             </button>
-          )}
-          {doc.history.length > 0 && (
-            <button className="ghost subtleButton" onClick={() => setHistoryOpen((value) => !value)}>
-              <History size={16} /> Historique
-            </button>
-          )}
-          {canRestorePrevious && previousHistory && (
-            <button className="ghost" onClick={() => onRestorePrevious(doc)}>
-              <ArrowLeft size={17} /> Revenir en {labels[previousHistory.fromType]}
-            </button>
-          )}
-          {!readOnly && doc.type === "quote" && (
-            <button onClick={() => onConvert(doc, "order")}>
-              <PackageCheck size={17} /> Transformer en BC
-            </button>
-          )}
-          {!readOnly && doc.type === "order" && (
-            <button onClick={() => onConvert(doc, "invoice")}>
-              <ReceiptText size={17} /> Facturer
-            </button>
-          )}
-          {canCreateCreditNote && (
-            <button onClick={() => onConvert(doc, "creditNote")}>
-              <ReceiptText size={17} /> Avoir
-            </button>
-          )}
-          {canCreateReturnInvoice && (
-            <button onClick={() => onConvert(doc, "returnInvoice")}>
-              <PackageCheck size={17} /> Retour
-            </button>
-          )}
-          <button onClick={() => onExport(doc)}>
-            <Download size={17} /> PDF
-          </button>
-          <button className="ghost" disabled={emailing} onClick={sendEmail}>
-            {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
-            {emailing ? "Préparation..." : "Email"}
-          </button>
-          {!readOnly && (
-            <button className="danger" onClick={() => onDelete(doc)}>
-              <Trash2 size={17} />
-            </button>
-          )}
+          </div>
+          <div className="editorActionGroup secondaryActions">
+            {!readOnly && (
+              <button className="ghost" onClick={() => onDuplicate(doc)}>
+                <CopyPlus size={17} /> Dupliquer
+              </button>
+            )}
+            {doc.history.length > 0 && (
+              <button className="ghost" onClick={() => setHistoryOpen((value) => !value)}>
+                <History size={16} /> Historique
+              </button>
+            )}
+            {canRestorePrevious && previousHistory && (
+              <button className="ghost" onClick={() => onRestorePrevious(doc)}>
+                <ArrowLeft size={17} /> Revenir en {labels[previousHistory.fromType]}
+              </button>
+            )}
+            {!readOnly && (
+              <button
+                className="danger iconButton"
+                title="Supprimer le document"
+                aria-label="Supprimer le document"
+                onClick={() => onDelete(doc)}
+              >
+                <Trash2 size={17} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {historyOpen && <HistoryPanel doc={doc} />}
 
-      <div className="editorGrid">
-        <label>
-          Client
-          <select disabled={readOnly} value={doc.clientId} onChange={(event) => patch({ clientId: event.target.value })}>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {clientLabel(client)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Nom du document / chantier
-          <input
-            disabled={readOnly}
-            placeholder="Ex. : dressing chambre parentale"
-            value={doc.projectName}
-            onChange={(event) => patch({ projectName: event.target.value })}
-          />
-        </label>
-        <label>
-          Date
-          <input disabled={readOnly} type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} />
-        </label>
-        <label>
-          Échéance
-          <input disabled={readOnly} type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} />
-        </label>
-        <label>
-          Adresse chantier
-          <input
-            disabled={readOnly}
-            placeholder="Adresse du chantier si différente du client"
-            value={doc.siteAddress}
-            onChange={(event) => patch({ siteAddress: event.target.value })}
-          />
-        </label>
-        <label>
-          Démarrage prévu
-          <input
-            disabled={readOnly}
-            placeholder="Ex. : semaine 42"
-            value={doc.workStart}
-            onChange={(event) => patch({ workStart: event.target.value })}
-          />
-        </label>
-        <label>
-          Durée estimée
-          <input
-            disabled={readOnly}
-            placeholder="Ex. : 3 jours"
-            value={doc.workDuration}
-            onChange={(event) => patch({ workDuration: event.target.value })}
-          />
-        </label>
-        <label>
-          Acompte %
-          <input
-            disabled={readOnly}
-            type="number"
-            placeholder="30"
-            value={doc.depositRate || ""}
-            onChange={(event) => patch({ depositRate: Number(event.target.value) })}
-          />
-        </label>
-      </div>
-
-      {!readOnly && (
-        <div className="lineToolbar">
-          <select
-            onChange={(event) => {
-              onAddCatalogLine(doc, event.target.value);
-              event.currentTarget.value = "";
-            }}
-            defaultValue=""
-          >
-            <option value="" disabled>
-              Ajouter depuis articles / prestations
-            </option>
-            {catalog.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.category || "Sans catégorie"} - {item.name || "Article sans nom"} ({currency(item.price)}/{item.unit || "u"})
-              </option>
-            ))}
-          </select>
-          <button onClick={() => patch({ lines: [...doc.lines, emptyLine(doc.lines[0]?.vatRate ?? 20)] })}>
-            <CopyPlus size={17} /> Ligne libre
-          </button>
-        </div>
-      )}
-
-      <div className="lineTable">
-        <div className="lineHead">
-          <span>Désignation</span>
-          <span>Unité</span>
-          <span>Qté</span>
-          <span>PU HT</span>
-          <span>Remise</span>
-          <span>TVA</span>
-          <span>Total</span>
-          <span>Marge</span>
-          <span></span>
-        </div>
-        {doc.lines.map((line) => {
-          const margin = lineMargin(line);
-          const targetMargin = Number(marginTargets[line.id]);
-          const targetDiscount = Number.isFinite(targetMargin) ? requiredDiscountForMargin(line, targetMargin) : null;
-          const canApplyTargetDiscount = targetDiscount !== null && targetDiscount >= 0 && targetDiscount <= 100;
-          return (
-            <div className="lineRow" key={line.id}>
+      <div className="documentInfoLayout">
+        <section className="documentInfoCard">
+          <div className="documentSectionTitle">
+            <div>
+              <span className="sectionStep">1</span>
               <div>
+                <h3>Informations générales</h3>
+                <p>Client, objet et calendrier du document</p>
+              </div>
+            </div>
+          </div>
+          <div className="editorGrid">
+            <label>
+              Client
+              <select disabled={readOnly} value={doc.clientId} onChange={(event) => patch({ clientId: event.target.value })}>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {clientLabel(client)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Nom du document / chantier
+              <input
+                disabled={readOnly}
+                placeholder="Ex. : dressing chambre parentale"
+                value={doc.projectName}
+                onChange={(event) => patch({ projectName: event.target.value })}
+              />
+            </label>
+            <label>
+              Date d’émission
+              <input disabled={readOnly} type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} />
+            </label>
+            <label>
+              Échéance
+              <input disabled={readOnly} type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} />
+            </label>
+          </div>
+        </section>
+
+        <section className="documentInfoCard">
+          <div className="documentSectionTitle">
+            <div>
+              <span className="sectionStep">2</span>
+              <div>
+                <h3>Chantier et conditions</h3>
+                <p>Lieu, planning et acompte demandé</p>
+              </div>
+            </div>
+          </div>
+          <div className="editorGrid">
+            <label>
+              Adresse du chantier
+              <input
+                disabled={readOnly}
+                placeholder="Si différente de l’adresse client"
+                value={doc.siteAddress}
+                onChange={(event) => patch({ siteAddress: event.target.value })}
+              />
+            </label>
+            <label>
+              Démarrage prévu
+              <input
+                disabled={readOnly}
+                placeholder="Ex. : semaine 42"
+                value={doc.workStart}
+                onChange={(event) => patch({ workStart: event.target.value })}
+              />
+            </label>
+            <label>
+              Durée estimée
+              <input
+                disabled={readOnly}
+                placeholder="Ex. : 3 jours"
+                value={doc.workDuration}
+                onChange={(event) => patch({ workDuration: event.target.value })}
+              />
+            </label>
+            <label>
+              Acompte demandé
+              <span className="suffixInput formSuffix">
                 <input
                   disabled={readOnly}
-                  placeholder="Nom de l'article ou prestation"
-                  value={line.description}
-                  onChange={(event) => patchLine(line.id, { description: event.target.value })}
+                  type="number"
+                  placeholder="30"
+                  value={doc.depositRate || ""}
+                  onChange={(event) => patch({ depositRate: Number(event.target.value) })}
                 />
-                <textarea
-                  disabled={readOnly}
-                  value={line.details}
-                  onChange={(event) => patchLine(line.id, { details: event.target.value })}
-                  placeholder="Détails : essence, finition, quincaillerie, pose..."
-                />
-                {!readOnly && (
-                  <div className="marginHelperShell">
-                    <button
-                      className="ghost subtleButton marginHelpButton"
-                      type="button"
-                      onClick={() => setMarginHelperOpen((open) => ({ ...open, [line.id]: !open[line.id] }))}
-                    >
-                      {marginHelperOpen[line.id] ? "Masquer aide marge" : "Aide marge"}
-                    </button>
-                    {marginHelperOpen[line.id] && (
-                      <div className="marginHelper">
-                        <label>
-                          Marge cible
-                          <span className="suffixInput compactSuffix">
-                            <input
-                              type="number"
-                              placeholder="30"
-                              value={marginTargets[line.id] || ""}
-                              onChange={(event) => setMarginTargets((targets) => ({ ...targets, [line.id]: event.target.value }))}
-                            />
-                            <span>%</span>
-                          </span>
-                        </label>
-                        <div>
-                          {!line.purchasePrice ? (
-                            <span>Main d'oeuvre : marge 100%</span>
-                          ) : targetDiscount === null || !marginTargets[line.id] ? (
-                            <span>Renseignez une marge cible</span>
-                          ) : canApplyTargetDiscount ? (
-                            <span>Remise conseillée : {targetDiscount.toFixed(1)}%</span>
-                          ) : (
-                            <span>Objectif impossible avec ce prix d'achat</span>
-                          )}
-                          <button
-                            className="ghost subtleButton"
-                            type="button"
-                            disabled={!canApplyTargetDiscount}
-                            onClick={() => patchLine(line.id, { discount: Number(targetDiscount?.toFixed(2)) })}
-                          >
-                            Appliquer
-                          </button>
-                        </div>
+                <span>%</span>
+              </span>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <section className="documentSection lineEditorSection">
+        <div className="documentSectionTitle">
+          <div>
+            <span className="sectionStep">3</span>
+            <div>
+              <h3>Articles et prestations</h3>
+              <p>{doc.lines.length ? `${doc.lines.length} ligne(s) dans le document` : "Ajoutez les éléments à facturer"}</p>
+            </div>
+          </div>
+        </div>
+        {!readOnly && (
+          <div className="lineToolbar">
+            <select
+              onChange={(event) => {
+                onAddCatalogLine(doc, event.target.value);
+                event.currentTarget.value = "";
+              }}
+              defaultValue=""
+            >
+              <option value="" disabled>
+                Ajouter depuis le catalogue
+              </option>
+              {catalog.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.category || "Sans catégorie"} - {item.name || "Élément sans nom"} ({currency(item.price)}/{item.unit || "u"})
+                </option>
+              ))}
+            </select>
+            <button onClick={() => patch({ lines: [...doc.lines, emptyLine(doc.lines[0]?.vatRate ?? 20)] })}>
+              <CopyPlus size={17} /> Ligne libre
+            </button>
+          </div>
+        )}
+
+        {doc.lines.length ? (
+          <div className="lineTable">
+            <div className="lineHead">
+              <span>Désignation</span>
+              <span>Unité</span>
+              <span>Qté</span>
+              <span>PU HT</span>
+              <span>Remise</span>
+              <span>TVA</span>
+              <span>Total</span>
+              <span>Marge</span>
+              <span></span>
+            </div>
+            {doc.lines.map((line) => {
+              const margin = lineMargin(line);
+              const targetMargin = Number(marginTargets[line.id]);
+              const targetDiscount = Number.isFinite(targetMargin) ? requiredDiscountForMargin(line, targetMargin) : null;
+              const canApplyTargetDiscount = targetDiscount !== null && targetDiscount >= 0 && targetDiscount <= 100;
+              return (
+                <div className="lineRow" key={line.id}>
+                  <div>
+                    <input
+                      disabled={readOnly}
+                      placeholder="Nom de l'article ou prestation"
+                      value={line.description}
+                      onChange={(event) => patchLine(line.id, { description: event.target.value })}
+                    />
+                    <textarea
+                      disabled={readOnly}
+                      value={line.details}
+                      onChange={(event) => patchLine(line.id, { details: event.target.value })}
+                      placeholder="Détails : essence, finition, quincaillerie, pose..."
+                    />
+                    {!readOnly && (
+                      <div className="marginHelperShell">
+                        <button
+                          className="ghost subtleButton marginHelpButton"
+                          type="button"
+                          onClick={() => setMarginHelperOpen((open) => ({ ...open, [line.id]: !open[line.id] }))}
+                        >
+                          {marginHelperOpen[line.id] ? "Masquer aide marge" : "Aide marge"}
+                        </button>
+                        {marginHelperOpen[line.id] && (
+                          <div className="marginHelper">
+                            <label>
+                              Marge cible
+                              <span className="suffixInput compactSuffix">
+                                <input
+                                  type="number"
+                                  placeholder="30"
+                                  value={marginTargets[line.id] || ""}
+                                  onChange={(event) => setMarginTargets((targets) => ({ ...targets, [line.id]: event.target.value }))}
+                                />
+                                <span>%</span>
+                              </span>
+                            </label>
+                            <div>
+                              {!line.purchasePrice ? (
+                                <span>Main d'oeuvre : marge 100%</span>
+                              ) : targetDiscount === null || !marginTargets[line.id] ? (
+                                <span>Renseignez une marge cible</span>
+                              ) : canApplyTargetDiscount ? (
+                                <span>Remise conseillée : {targetDiscount.toFixed(1)}%</span>
+                              ) : (
+                                <span>Objectif impossible avec ce prix d'achat</span>
+                              )}
+                              <button
+                                className="ghost subtleButton"
+                                type="button"
+                                disabled={!canApplyTargetDiscount}
+                                onClick={() => patchLine(line.id, { discount: Number(targetDiscount?.toFixed(2)) })}
+                              >
+                                Appliquer
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-              <input
-                disabled={readOnly}
-                placeholder="u, ml, m2, h"
-                value={line.unit}
-                onChange={(event) => patchLine(line.id, { unit: event.target.value })}
-              />
-              <input
-                disabled={readOnly}
-                type="number"
-                placeholder="1"
-                value={line.quantity || ""}
-                onChange={(event) => patchLine(line.id, { quantity: Number(event.target.value) })}
-              />
-              <input
-                disabled={readOnly}
-                type="number"
-                placeholder="0.00"
-                value={line.unitPrice || ""}
-                onChange={(event) => patchLine(line.id, { unitPrice: Number(event.target.value) })}
-              />
-              <span className="suffixInput">
-                <input
-                  disabled={readOnly}
-                  type="number"
-                  placeholder="0"
-                  value={line.discount || ""}
-                  onChange={(event) => patchLine(line.id, { discount: Number(event.target.value) })}
-                />
-                <span>%</span>
-              </span>
-              <span className="suffixInput">
-                <input
-                  disabled={readOnly}
-                  type="number"
-                  placeholder="20"
-                  value={line.vatRate || ""}
-                  onChange={(event) => patchLine(line.id, { vatRate: Number(event.target.value) })}
-                />
-                <span>%</span>
-              </span>
-              <strong>{currency(line.quantity * line.unitPrice * (1 - line.discount / 100))}</strong>
-              <strong className={margin.amount < 0 ? "marginValue negative" : "marginValue"}>
-                <span>{currency(margin.amount)}</span>
-                <em>{margin.rate.toFixed(0)}%</em>
-              </strong>
-              {!readOnly && (
-                <button className="iconButton" onClick={() => patch({ lines: doc.lines.filter((item) => item.id !== line.id) })}>
-                  <Trash2 size={16} />
-                </button>
-              )}
+                  <input
+                    disabled={readOnly}
+                    placeholder="u, ml, m2, h"
+                    value={line.unit}
+                    onChange={(event) => patchLine(line.id, { unit: event.target.value })}
+                  />
+                  <input
+                    disabled={readOnly}
+                    type="number"
+                    placeholder="1"
+                    value={line.quantity || ""}
+                    onChange={(event) => patchLine(line.id, { quantity: Number(event.target.value) })}
+                  />
+                  <input
+                    disabled={readOnly}
+                    type="number"
+                    placeholder="0.00"
+                    value={line.unitPrice || ""}
+                    onChange={(event) => patchLine(line.id, { unitPrice: Number(event.target.value) })}
+                  />
+                  <span className="suffixInput">
+                    <input
+                      disabled={readOnly}
+                      type="number"
+                      placeholder="0"
+                      value={line.discount || ""}
+                      onChange={(event) => patchLine(line.id, { discount: Number(event.target.value) })}
+                    />
+                    <span>%</span>
+                  </span>
+                  <span className="suffixInput">
+                    <input
+                      disabled={readOnly}
+                      type="number"
+                      placeholder="20"
+                      value={line.vatRate || ""}
+                      onChange={(event) => patchLine(line.id, { vatRate: Number(event.target.value) })}
+                    />
+                    <span>%</span>
+                  </span>
+                  <strong>{currency(line.quantity * line.unitPrice * (1 - line.discount / 100))}</strong>
+                  <strong className={margin.amount < 0 ? "marginValue negative" : "marginValue"}>
+                    <span>{currency(margin.amount)}</span>
+                    <em>{margin.rate.toFixed(0)}%</em>
+                  </strong>
+                  {!readOnly && (
+                    <button className="iconButton dangerIcon" title="Supprimer cette ligne" onClick={() => removeLine(line)}>
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="documentLinesEmpty">
+            <PackageCheck size={28} />
+            <div>
+              <strong>Aucune ligne pour le moment</strong>
+              <span>Utilisez le catalogue ou ajoutez une ligne libre pour commencer.</span>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        )}
+      </section>
 
-      <div className="bottomEditor">
-        <label>
-          Note document
-          <textarea
-            disabled={readOnly}
-            placeholder="Informations affichées sur ce document"
-            value={doc.notes}
-            onChange={(event) => patch({ notes: event.target.value })}
-          />
-        </label>
-        <label>
-          Conditions
-          <textarea
-            disabled={readOnly}
-            placeholder="Conditions propres à ce document"
-            value={doc.terms}
-            onChange={(event) => patch({ terms: event.target.value })}
-          />
-        </label>
-        <div className="totalsBox">
+      <section className="documentSection summarySection">
+        <div className="documentSectionTitle">
           <div>
-            <span>Total HT</span>
-            <strong>{currency(sums.totalHt)}</strong>
-          </div>
-          {Object.entries(sums.vatGroups).map(([rate, amount]) => (
-            <div key={rate}>
-              <span>TVA {rate}%</span>
-              <strong>{currency(amount)}</strong>
+            <span className="sectionStep">4</span>
+            <div>
+              <h3>Conditions et totaux</h3>
+              <p>Informations finales qui apparaîtront sur le document</p>
             </div>
-          ))}
-          <div className="grand">
-            <span>Total TTC</span>
-            <strong>{currency(sums.totalTtc)}</strong>
-          </div>
-          <div>
-            <span>Acompte</span>
-            <strong>{currency(sums.totalTtc * (doc.depositRate / 100))}</strong>
           </div>
         </div>
-      </div>
+        <div className="bottomEditor">
+          <label>
+            Note document
+            <textarea
+              disabled={readOnly}
+              placeholder="Informations affichées sur ce document"
+              value={doc.notes}
+              onChange={(event) => patch({ notes: event.target.value })}
+            />
+          </label>
+          <label>
+            Conditions
+            <textarea
+              disabled={readOnly}
+              placeholder="Conditions propres à ce document"
+              value={doc.terms}
+              onChange={(event) => patch({ terms: event.target.value })}
+            />
+          </label>
+          <div className="totalsBox">
+            <div>
+              <span>Total HT</span>
+              <strong>{currency(sums.totalHt)}</strong>
+            </div>
+            {Object.entries(sums.vatGroups).map(([rate, amount]) => (
+              <div key={rate}>
+                <span>TVA {rate}%</span>
+                <strong>{currency(amount)}</strong>
+              </div>
+            ))}
+            <div className="grand">
+              <span>Total TTC</span>
+              <strong>{currency(sums.totalTtc)}</strong>
+            </div>
+            <div>
+              <span>Acompte</span>
+              <strong>{currency(sums.totalTtc * (doc.depositRate / 100))}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {doc.type === "invoice" && (
         <section className="paymentPanel" aria-label="Paiements">
@@ -3020,7 +3241,12 @@ function DocumentEditor({
           </div>
         )}
       </section>
-      <DocumentPreview doc={doc} client={client} sums={sums} />
+      <section className="previewDisclosure">
+        <button className="ghost previewToggle" type="button" onClick={() => setPreviewOpen((open) => !open)}>
+          <Eye size={17} /> {previewOpen ? "Masquer l’aperçu" : "Afficher l’aperçu"}
+        </button>
+        {previewOpen && <DocumentPreview doc={doc} client={client} sums={sums} />}
+      </section>
     </article>
   );
 }
@@ -3089,14 +3315,25 @@ function CatalogManager({
   onDelete: (item: CatalogItem) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [stockFilter, setStockFilter] = useState<"all" | "tracked" | "low" | "out" | "untracked">("all");
   const [movementDrafts, setMovementDrafts] = useState<Record<string, { quantity: string; reason: string }>>({});
   const [movementOpen, setMovementOpen] = useState<Record<string, boolean>>({});
-  const filtered = items.filter((item) =>
-    `${item.name} ${item.category} ${item.unit} ${item.supplier} ${item.location}`.toLowerCase().includes(query.toLowerCase())
-  );
   const trackedItems = items.filter((item) => item.trackStock);
   const lowStockCount = trackedItems.filter((item) => item.stockQuantity > 0 && item.stockQuantity <= item.stockMinimum).length;
   const outOfStockCount = trackedItems.filter((item) => item.stockQuantity <= 0).length;
+  const filtered = items
+    .filter((item) =>
+      normalizeSearch(`${item.name} ${item.category} ${item.unit} ${item.supplier} ${item.location}`).includes(
+        normalizeSearch(query.trim())
+      )
+    )
+    .filter((item) => {
+      if (stockFilter === "tracked") return item.trackStock;
+      if (stockFilter === "untracked") return !item.trackStock;
+      if (stockFilter === "low") return item.trackStock && item.stockQuantity > 0 && item.stockQuantity <= item.stockMinimum;
+      if (stockFilter === "out") return item.trackStock && item.stockQuantity <= 0;
+      return true;
+    });
   const patch = (item: CatalogItem, partial: Partial<CatalogItem>) => onChange({ ...item, ...partial });
   const movementDraft = (itemId: string) => movementDrafts[itemId] || { quantity: "", reason: "" };
   const patchMovementDraft = (itemId: string, partial: Partial<{ quantity: string; reason: string }>) =>
@@ -3146,16 +3383,31 @@ function CatalogManager({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rechercher article, prestation, catégorie, fournisseur..."
+            placeholder="Rechercher un article, une prestation, une catégorie..."
           />
         </div>
+        <select
+          aria-label="Filtrer le catalogue"
+          value={stockFilter}
+          onChange={(event) => setStockFilter(event.target.value as typeof stockFilter)}
+        >
+          <option value="all">Tout le catalogue</option>
+          <option value="tracked">Stock suivi</option>
+          <option value="low">Stock bas</option>
+          <option value="out">En rupture</option>
+          <option value="untracked">Sans suivi de stock</option>
+        </select>
         <button onClick={onCreate}>
-          <Plus size={17} /> Ajouter
+          <Plus size={17} /> Nouvel élément
         </button>
       </div>
       <div className="stockSummary">
         <div>
-          <span>Articles suivis</span>
+          <span>Éléments</span>
+          <strong>{items.length}</strong>
+        </div>
+        <div>
+          <span>Stock suivi</span>
           <strong>{trackedItems.length}</strong>
         </div>
         <div>
@@ -3173,11 +3425,16 @@ function CatalogManager({
             <div className="catalogMain">
               <div className="catalogRowHeader">
                 <div>
-                  <strong>{item.name || "Article sans nom"}</strong>
+                  <strong>{item.name || "Élément sans nom"}</strong>
                   <span>{item.category || "Sans catégorie"}</span>
                 </div>
                 <span className={`statusBadge ${stockTone(item)}`}>{stockLabel(item)}</span>
-                <button className="iconButton" onClick={() => onDelete(item)}>
+                <button
+                  className="iconButton dangerIcon"
+                  title="Supprimer cet élément"
+                  aria-label="Supprimer cet élément"
+                  onClick={() => onDelete(item)}
+                >
                   <Trash2 size={16} />
                 </button>
               </div>
@@ -3337,7 +3594,13 @@ function CatalogManager({
             </div>
           </article>
         ))}
-        {!filtered.length && <div className="emptyRows">Aucun article ne correspond.</div>}
+        {!filtered.length && (
+          <div className="emptyRows">
+            {items.length
+              ? "Aucun élément ne correspond à cette recherche ou à ce filtre."
+              : "Le catalogue est vide. Ajoutez un premier article ou une prestation."}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -3562,6 +3825,159 @@ function ClientCard({
         />
       </label>
     </article>
+  );
+}
+
+const companyIdentityFields: Array<[keyof CompanySettings, string, "text" | "number", string]> = [
+  ["name", "Nom commercial", "text", "Votre société"],
+  ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
+  ["siret", "SIRET", "text", "123 456 789 00010"],
+  ["vatNumber", "N° TVA", "text", "FR..."],
+  ["address", "Adresse", "text", "12 rue des Copeaux"],
+  ["postalCode", "Code postal", "text", "75000"],
+  ["city", "Ville", "text", "Paris"],
+  ["phone", "Téléphone", "text", "01 23 45 67 89"],
+  ["email", "Email", "text", "contact@societe.fr"],
+  ["website", "Site web", "text", "https://..."],
+  ["iban", "IBAN", "text", "FR76..."],
+  ["bic", "BIC", "text", "ABCDEFGH"],
+  ["quoteValidityDays", "Validité devis (jours)", "number", "30"],
+  ["defaultVatRate", "TVA par défaut", "number", "20"],
+  ["defaultDepositRate", "Acompte par défaut", "number", "30"],
+];
+
+function CompanySettingsEditor({
+  company,
+  readOnly,
+  onSave,
+}: {
+  company: CompanySettings;
+  readOnly: boolean;
+  onSave: (company: CompanySettings) => Promise<boolean>;
+}) {
+  const [identityDraft, setIdentityDraft] = useState(company);
+  const [paymentTermsDraft, setPaymentTermsDraft] = useState(company.paymentTerms);
+  const [notesDraft, setNotesDraft] = useState(company.notes);
+  const [savingBlock, setSavingBlock] = useState<string | null>(null);
+  const [savedBlock, setSavedBlock] = useState<string | null>(null);
+  const saveLock = useRef(false);
+
+  const identitySignature = companyIdentityFields.map(([key]) => String(company[key] ?? "")).join("\u0000");
+
+  useEffect(() => setIdentityDraft(company), [identitySignature]);
+  useEffect(() => setPaymentTermsDraft(company.paymentTerms), [company.paymentTerms]);
+  useEffect(() => setNotesDraft(company.notes), [company.notes]);
+
+  async function saveBlock(block: string, next: CompanySettings) {
+    if (saveLock.current) return;
+    saveLock.current = true;
+    setSavedBlock(null);
+    setSavingBlock(block);
+    const saved = await onSave(next);
+    setSavingBlock(null);
+    if (!saved) {
+      saveLock.current = false;
+      return;
+    }
+    setSavedBlock(block);
+    window.setTimeout(() => {
+      setSavedBlock((current) => (current === block ? null : current));
+      saveLock.current = false;
+    }, 1800);
+  }
+
+  function saveIdentity() {
+    const next = { ...company };
+    for (const [key] of companyIdentityFields) {
+      (next as unknown as Record<keyof CompanySettings, CompanySettings[keyof CompanySettings]>)[key] = identityDraft[key];
+    }
+    void saveBlock("identity", next);
+  }
+
+  return (
+    <div className="companySettingsBlocks">
+      <section className="companySettingsBlock">
+        <FormGrid value={identityDraft} readOnly={readOnly} onChange={setIdentityDraft} fields={companyIdentityFields} />
+        {!readOnly && (
+          <div className="settingsSaveAction">
+            {savedBlock === "identity" && (
+              <span className="inlineSaveConfirmation">
+                <Check size={16} /> Enregistré
+              </span>
+            )}
+            <button
+              type="button"
+              className={savedBlock === "identity" ? "saveButton saved" : "saveButton"}
+              disabled={savingBlock !== null || savedBlock !== null}
+              onClick={saveIdentity}
+            >
+              {savedBlock === "identity" ? <Check size={17} /> : <Save size={17} />}
+              {savingBlock === "identity" ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="companySettingsBlock">
+        <label className="fullLabel">
+          Conditions de paiement
+          <textarea
+            disabled={readOnly}
+            placeholder="Ex. : 30 % d'acompte à la commande..."
+            value={paymentTermsDraft}
+            onChange={(event) => setPaymentTermsDraft(event.target.value)}
+          />
+        </label>
+        {!readOnly && (
+          <div className="settingsSaveAction">
+            {savedBlock === "payment" && (
+              <span className="inlineSaveConfirmation">
+                <Check size={16} /> Enregistré
+              </span>
+            )}
+            <button
+              type="button"
+              className={savedBlock === "payment" ? "saveButton saved" : "saveButton"}
+              disabled={savingBlock !== null || savedBlock !== null}
+              onClick={() => void saveBlock("payment", { ...company, paymentTerms: paymentTermsDraft })}
+            >
+              {savedBlock === "payment" ? <Check size={17} /> : <Save size={17} />}
+              {savingBlock === "payment" ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="companySettingsBlock">
+        <label className="fullLabel">
+          Note par défaut
+          <textarea
+            disabled={readOnly}
+            placeholder="Note affichée sur les nouveaux documents"
+            value={notesDraft}
+            onChange={(event) => setNotesDraft(event.target.value)}
+          />
+        </label>
+        {!readOnly && (
+          <div className="settingsSaveAction">
+            {savedBlock === "notes" && (
+              <span className="inlineSaveConfirmation">
+                <Check size={16} /> Enregistré
+              </span>
+            )}
+            <button
+              type="button"
+              className={savedBlock === "notes" ? "saveButton saved" : "saveButton"}
+              disabled={savingBlock !== null || savedBlock !== null}
+              onClick={() => void saveBlock("notes", { ...company, notes: notesDraft })}
+            >
+              {savedBlock === "notes" ? <Check size={17} /> : <Save size={17} />}
+              {savingBlock === "notes" ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

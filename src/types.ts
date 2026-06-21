@@ -1,8 +1,11 @@
+import type { ThemeId } from "./themes";
+
 export type DocumentType = "quote" | "order" | "invoice" | "creditNote" | "returnInvoice";
 export type DocumentStatus = "draft" | "partial" | "paid";
 export type PaymentMethod = "bank_transfer" | "check" | "cash" | "card" | "other";
 
 export interface CompanySettings {
+  themeId: ThemeId;
   name: string;
   legalName: string;
   siret: string;

@@ -15,8 +15,10 @@ import type {
   PaymentReminder,
 } from "./types";
 import { addDaysIso, makeId, todayIso } from "./utils";
+import { defaultThemeId, isThemeId } from "./themes";
 
 export const defaultCompany: CompanySettings = {
+  themeId: defaultThemeId,
   name: "",
   legalName: "",
   siret: "",
@@ -363,7 +365,11 @@ function normalizeCatalogItem(item: Partial<CatalogItem>): CatalogItem {
 
 export function normalizeData(input?: Partial<AppData> | null): AppData {
   const fallback = createDefaultAppData();
-  const company = { ...fallback.company, ...(input?.company ?? {}) };
+  const company = {
+    ...fallback.company,
+    ...(input?.company ?? {}),
+    themeId: isThemeId(input?.company?.themeId) ? input.company.themeId : fallback.company.themeId,
+  };
 
   return {
     company,
