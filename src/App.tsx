@@ -192,6 +192,7 @@ export function App() {
   const [loadError, setLoadError] = useState("");
   const [view, setView] = useState<View>("dashboard");
   const [selectedId, setSelectedId] = useState("");
+  const [documentBackView, setDocumentBackView] = useState<"documents" | "clients">("documents");
   const [query, setQuery] = useState("");
   const [clientQuery, setClientQuery] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -469,6 +470,10 @@ export function App() {
   const selectedClientForEdit = useMemo(
     () => data.clients.find((client) => client.id === selectedClientId),
     [data.clients, selectedClientId]
+  );
+  const selectedClientDocuments = useMemo(
+    () => sortedDocuments.filter((doc) => doc.clientId === selectedClientId),
+    [selectedClientId, sortedDocuments]
   );
   const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin";
   const canManageCompany = !workspace || workspace.role === "owner" || workspace.role === "admin";
@@ -768,8 +773,9 @@ export function App() {
     return <main className="loading">Chargement de Devix...</main>;
   }
 
-  function openDocument(id: string) {
+  function openDocument(id: string, from: "documents" | "clients" = "documents") {
     setSelectedId(id);
+    setDocumentBackView(from);
     setView("documentDetail");
   }
 
@@ -779,7 +785,7 @@ export function App() {
     if (view === "documentDetail" && selectedDoc) return `${labels[selectedDoc.type]} ${selectedDoc.number}`;
     if (view === "documentDetail") return "Document";
     if (view === "catalog") return "Articles et prestations";
-    if (view === "clients") return "Fichier clients";
+    if (view === "clients") return "Dossiers clients";
     return canViewCompanySettings ? "Paramètres société" : "Mon compte";
   }
 
@@ -831,12 +837,12 @@ export function App() {
     setView("clients");
   }
 
-  async function createDocument(type: DocumentType = "quote") {
+  async function createDocument(type: DocumentType = "quote", clientId?: string) {
     if (!canEditOperations) {
       showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
-    const withClient = await ensureClient(data);
+    const withClient = clientId && data.clients.some((client) => client.id === clientId) ? { data, clientId } : await ensureClient(data);
     const reserved = await reserveNumber(type, withClient.data);
     const issueDate = todayIso();
     const doc: BusinessDocument = {
@@ -867,6 +873,8 @@ export function App() {
     };
     await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} créé`);
     setSelectedId(doc.id);
+    setSelectedClientId(withClient.clientId);
+    setDocumentBackView(clientId ? "clients" : "documents");
     setView("documentDetail");
   }
 
@@ -1386,9 +1394,10 @@ export function App() {
             <Home size={18} /> Tableau
           </button>
           <button
-            className={view === "documents" || view === "documentDetail" ? "active" : ""}
+            className={view === "documents" || (view === "documentDetail" && documentBackView === "documents") ? "active" : ""}
             onClick={() => {
               setSelectedId("");
+              setDocumentBackView("documents");
               setView("documents");
             }}
           >
@@ -1399,7 +1408,10 @@ export function App() {
               <PackageCheck size={18} /> Articles
             </button>
           )}
-          <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}>
+          <button
+            className={view === "clients" || (view === "documentDetail" && documentBackView === "clients") ? "active" : ""}
+            onClick={() => setView("clients")}
+          >
             <Users size={18} /> Clients
           </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
@@ -1411,6 +1423,7 @@ export function App() {
             <button
               onClick={() => {
                 setSelectedId("");
+                setDocumentBackView("documents");
                 setTypeFilter("quote");
                 setView("documents");
               }}
@@ -1597,10 +1610,10 @@ export function App() {
                 className="ghost"
                 onClick={() => {
                   setSelectedId("");
-                  setView("documents");
+                  setView(documentBackView);
                 }}
               >
-                <ArrowLeft size={17} /> Retour aux documents
+                <ArrowLeft size={17} /> {documentBackView === "clients" ? "Retour au client" : "Retour aux documents"}
               </button>
             </div>
             {selectedDoc ? (
@@ -1670,26 +1683,41 @@ export function App() {
             <div className="listMeta">{filteredClients.length} client(s)</div>
             <div className="clientsLayout">
               <div className="clientList">
-                {filteredClients.map((client) => (
-                  <button
-                    key={client.id}
-                    className={selectedClientId === client.id ? "clientListRow selected" : "clientListRow"}
-                    onClick={() => setSelectedClientId(client.id)}
-                  >
-                    <span>{client.number}</span>
-                    <strong>{client.name || "Client sans nom"}</strong>
-                    <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
-                  </button>
-                ))}
+                {filteredClients.map((client) => {
+                  const docs = data.documents.filter((doc) => doc.clientId === client.id);
+                  const pending = docs.reduce((sum, doc) => {
+                    const value = totals(doc.lines).totalTtc;
+                    return sum + (doc.type === "invoice" ? paymentSummary(doc, value).remainingAmount : 0);
+                  }, 0);
+                  return (
+                    <button
+                      key={client.id}
+                      className={selectedClientId === client.id ? "clientListRow selected" : "clientListRow"}
+                      onClick={() => setSelectedClientId(client.id)}
+                    >
+                      <span>{client.number}</span>
+                      <strong>{client.name || "Client sans nom"}</strong>
+                      <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
+                      <small>
+                        {docs.length} document(s)
+                        {pending > 0 ? ` · ${currency(pending)} dû` : ""}
+                      </small>
+                    </button>
+                  );
+                })}
                 {!filteredClients.length && <div className="emptyRows">Aucun client ne correspond.</div>}
               </div>
               {selectedClientForEdit ? (
-                <ClientCard
+                <ClientFolder
                   client={selectedClientForEdit}
+                  documents={selectedClientDocuments}
                   readOnly={!canEditOperations}
                   canDelete={canDeleteClients}
+                  canCreateDocument={canEditOperations}
                   onChange={updateClient}
                   onDelete={deleteClient}
+                  onOpenDocument={(id) => openDocument(id, "clients")}
+                  onCreateDocument={(type) => createDocument(type, selectedClientForEdit.id)}
                 />
               ) : (
                 <div className="emptyState clientEmpty">
@@ -3310,6 +3338,132 @@ function CatalogManager({
           </article>
         ))}
         {!filtered.length && <div className="emptyRows">Aucun article ne correspond.</div>}
+      </div>
+    </section>
+  );
+}
+
+const clientDocumentTypes: DocumentType[] = ["quote", "order", "invoice", "creditNote", "returnInvoice"];
+const clientCreateDocumentTypes: DocumentType[] = ["quote", "order", "invoice"];
+
+function ClientFolder({
+  client,
+  documents,
+  readOnly,
+  canDelete,
+  canCreateDocument,
+  onChange,
+  onDelete,
+  onOpenDocument,
+  onCreateDocument,
+}: {
+  client: Client;
+  documents: BusinessDocument[];
+  readOnly: boolean;
+  canDelete: boolean;
+  canCreateDocument: boolean;
+  onChange: (client: Client) => void;
+  onDelete: (client: Client) => void;
+  onOpenDocument: (id: string) => void;
+  onCreateDocument: (type: DocumentType) => void;
+}) {
+  const invoiceDue = documents.reduce((sum, doc) => {
+    if (doc.type !== "invoice") return sum;
+    return sum + paymentSummary(doc).remainingAmount;
+  }, 0);
+  const totalBusiness = documents.reduce((sum, doc) => sum + totals(doc.lines).totalTtc, 0);
+  const lastActivity = documents[0] ? formatShortDate(activityDate(documents[0])) : "Aucune activité";
+
+  return (
+    <section className="clientFolder">
+      <div className="clientFolderHeader">
+        <div>
+          <span className="eyebrow">Dossier client</span>
+          <h2>{client.name || "Client sans nom"}</h2>
+          <p>
+            {client.number} · {client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}
+          </p>
+        </div>
+        {canCreateDocument && (
+          <div className="clientFolderActions">
+            {clientCreateDocumentTypes.map((type) => (
+              <button key={type} className={type === "quote" ? "" : "ghost"} onClick={() => onCreateDocument(type)}>
+                <Plus size={16} /> {type === "quote" ? "Nouveau devis" : labels[type]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="clientFolderKpis">
+        <div>
+          <span>Documents</span>
+          <strong>{documents.length}</strong>
+        </div>
+        <div>
+          <span>Volume TTC</span>
+          <strong>{currency(totalBusiness)}</strong>
+        </div>
+        <div>
+          <span>À encaisser</span>
+          <strong>{currency(invoiceDue)}</strong>
+        </div>
+        <div>
+          <span>Dernière activité</span>
+          <strong>{lastActivity}</strong>
+        </div>
+      </div>
+
+      <div className="clientFolderBody">
+        <ClientCard client={client} readOnly={readOnly} canDelete={canDelete} onChange={onChange} onDelete={onDelete} />
+        <section className="clientDocumentsPanel">
+          <div className="panelTitle">
+            <h3>Documents du client</h3>
+          </div>
+          {documents.length ? (
+            <div className="clientDocumentGroups">
+              {clientDocumentTypes.map((type) => {
+                const group = documents.filter((doc) => doc.type === type);
+                return (
+                  <div className="clientDocumentGroup" key={type}>
+                    <div className="clientDocumentGroupTitle">
+                      <strong>{labels[type]}</strong>
+                      <span>{group.length}</span>
+                    </div>
+                    {group.length ? (
+                      <div className="clientDocumentRows">
+                        {group.map((doc) => {
+                          const sum = totals(doc.lines).totalTtc;
+                          const due = doc.type === "invoice" ? paymentSummary(doc, sum).remainingAmount : null;
+                          return (
+                            <button className="clientDocumentRow" key={doc.id} onClick={() => onOpenDocument(doc.id)}>
+                              <span>{formatShortDate(activityDate(doc))}</span>
+                              <strong>
+                                {doc.number}
+                                <small>{doc.projectName || "Sans nom"}</small>
+                              </strong>
+                              <em>{currency(sum)}</em>
+                              {due !== null && due > 0.005 ? <b>{currency(due)} dû</b> : <StatusBadge status={doc.status} />}
+                              <ChevronRight size={16} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="emptyRows compactEmpty">Aucun document.</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="emptyState clientDocumentsEmpty">
+              <FileText size={38} />
+              <h2>Aucun document client</h2>
+              <p>Créez un devis, un bon de commande ou une facture depuis ce dossier.</p>
+            </div>
+          )}
+        </section>
       </div>
     </section>
   );

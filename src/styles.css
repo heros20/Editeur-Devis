@@ -412,6 +412,8 @@ textarea:disabled {
 .panel,
 .editor,
 .clientCard,
+.clientFolder,
+.clientDocumentsPanel,
 .settingsPanel,
 .emptyState {
   background: white;
@@ -1486,7 +1488,8 @@ textarea {
 }
 
 .clientListRow span,
-.clientListRow em {
+.clientListRow em,
+.clientListRow small {
   color: #756b62;
   font-style: normal;
   font-size: 12px;
@@ -1494,11 +1497,178 @@ textarea {
 }
 
 .clientListRow strong,
-.clientListRow em {
+.clientListRow em,
+.clientListRow small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.clientFolder {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  padding: 15px;
+}
+
+.clientFolderHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.clientFolderHeader p {
+  margin: 4px 0 0;
+  color: #756b62;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.clientFolderActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.clientFolderKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.clientFolderKpis div {
+  min-height: 62px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid #e4dbd1;
+  border-radius: 6px;
+  background: #f8faf7;
+}
+
+.clientFolderKpis span {
+  color: #69766f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.clientFolderKpis strong {
+  color: #20332f;
+  font-size: 17px;
+}
+
+.clientFolderBody {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.clientDocumentsPanel {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.clientDocumentGroups {
+  display: grid;
+  gap: 10px;
+}
+
+.clientDocumentGroup {
+  display: grid;
+  gap: 7px;
+}
+
+.clientDocumentGroupTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #e8e1d8;
+}
+
+.clientDocumentGroupTitle strong {
+  color: #20332f;
+  font-size: 14px;
+}
+
+.clientDocumentGroupTitle span {
+  min-width: 26px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2ef;
+  color: #40534d;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.clientDocumentRows {
+  display: grid;
+  gap: 6px;
+}
+
+.clientDocumentRow {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 118px 112px 18px;
+  align-items: center;
+  justify-content: stretch;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eee7df;
+  background: #fbfaf7;
+  color: #241b16;
+  text-align: left;
+}
+
+.clientDocumentRow span,
+.clientDocumentRow em,
+.clientDocumentRow b,
+.clientDocumentRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientDocumentRow span,
+.clientDocumentRow small {
+  color: #756b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.clientDocumentRow strong {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.clientDocumentRow em,
+.clientDocumentRow b {
+  color: #20332f;
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
+.clientDocumentRow b {
+  color: #7a5415;
+}
+
+.clientDocumentsEmpty {
+  min-height: 210px;
 }
 
 .clientCard {
@@ -1777,6 +1947,12 @@ textarea {
   .stockFields {
     grid-template-columns: repeat(2, minmax(130px, 1fr));
   }
+  .clientFolderBody {
+    grid-template-columns: 1fr;
+  }
+  .clientDocumentRow {
+    grid-template-columns: 84px minmax(0, 1fr) 104px 104px 18px;
+  }
   .stockMovement {
     grid-template-columns: 90px minmax(160px, 1fr) repeat(3, max-content);
   }
@@ -1830,6 +2006,7 @@ textarea {
 
   .statusGrid,
   .paymentSummary,
+  .clientFolderKpis,
   .paymentGrid,
   .reminderGrid {
     grid-template-columns: 1fr;
@@ -1863,6 +2040,7 @@ textarea {
   .catalogToolbar,
   .clientsToolbar,
   .clientsLayout,
+  .clientFolderBody,
   .catalogRow,
   .catalogFields,
   .stockFields,
@@ -1875,8 +2053,28 @@ textarea {
   }
 
   .teamRow,
-  .invitationRow {
+  .invitationRow,
+  .clientDocumentRow {
     grid-template-columns: minmax(0, 1fr) max-content 36px;
+  }
+
+  .clientDocumentRow span,
+  .clientDocumentRow strong {
+    grid-column: 1;
+  }
+
+  .clientDocumentRow em,
+  .clientDocumentRow b,
+  .clientDocumentRow .statusBadge {
+    grid-column: 2;
+  }
+
+  .clientFolderHeader {
+    flex-direction: column;
+  }
+
+  .clientFolderActions {
+    justify-content: flex-start;
   }
 
   nav button.nested {
