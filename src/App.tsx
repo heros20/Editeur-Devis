@@ -22,6 +22,7 @@ import {
   Paperclip,
   Plus,
   ReceiptText,
+  ShoppingCart,
   Save,
   Search,
   Settings,
@@ -35,6 +36,9 @@ import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useStat
 import { applyDocumentStockImpact, creditLines, makeDocumentSnapshot } from "./businessLogic";
 import { AccountingView } from "./AccountingView";
 import { SuppliersView } from "./SuppliersView";
+import { PurchasesView } from "./PurchasesView";
+import { applyPurchaseInvoiceStockImpact, purchaseInvoiceExpense, purchaseInvoiceTotals } from "./purchaseInvoices";
+import { applyPurchaseOrderStockImpact, renderPurchaseOrderHtml } from "./purchaseOrders";
 import { buildAccountingReport, type AccountingPeriod } from "./accounting";
 import { buildAccountingXlsx, renderAccountingHtml } from "./accountingExport";
 import { createDefaultAppData, normalizeData } from "./defaultData";
@@ -86,6 +90,8 @@ import type {
   PaymentEntry,
   PaymentMethod,
   PaymentReminder,
+  PurchaseInvoice,
+  PurchaseOrder,
   StockMovement,
   Supplier,
 } from "./types";
@@ -108,7 +114,17 @@ import {
   withPaymentStatus,
 } from "./utils";
 
-type View = "dashboard" | "documents" | "documentDetail" | "accounting" | "suppliers" | "catalog" | "clients" | "company" | "settings";
+type View =
+  | "dashboard"
+  | "documents"
+  | "documentDetail"
+  | "accounting"
+  | "purchases"
+  | "suppliers"
+  | "catalog"
+  | "clients"
+  | "company"
+  | "settings";
 type AuthMode = "signin" | "signup";
 type ReminderDraft = Pick<PaymentReminder, "sentAt" | "channel" | "note">;
 type ReminderSendResult = { success: boolean; message: string };
@@ -823,6 +839,7 @@ export function App() {
     if (view === "documentDetail") return "Document";
     if (view === "catalog") return "Catalogue";
     if (view === "accounting") return "Livre de comptes";
+    if (view === "purchases") return "Achats fournisseurs";
     if (view === "suppliers") return "Fournisseurs";
     if (view === "clients") return "Dossiers clients";
     if (view === "company") return "Informations société";
@@ -1337,6 +1354,14 @@ export function App() {
       showPermissionNotice();
       return;
     }
+    if (data.purchaseInvoices.some((invoice) => invoice.lines.some((line) => line.catalogItemId === item.id))) {
+      showPermissionNotice("Cet article est utilisé par une facture d’achat et ne peut pas être supprimé.");
+      return;
+    }
+    if (data.purchaseOrders.some((order) => order.lines.some((line) => line.catalogItemId === item.id))) {
+      showPermissionNotice("Cet article est utilisé par une commande fournisseur et ne peut pas être supprimé.");
+      return;
+    }
     if (!confirmDestructiveAction(`Supprimer « ${item.name || "cet élément"} » du catalogue ?`)) return;
     await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Élément supprimé du catalogue");
   }
@@ -1409,6 +1434,10 @@ export function App() {
       showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
+    if (expense.purchaseInvoiceId) {
+      showPermissionNotice("Cette dépense provient d’une facture d’achat. Annulez la validation depuis l’écran Achats.");
+      return;
+    }
     if (!confirmDestructiveAction(`Supprimer la dépense « ${expense.description} » ?`)) return;
     await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "Dépense supprimée");
   }
@@ -1424,7 +1453,16 @@ export function App() {
       expense.supplierId === supplier.id ? { ...expense, supplier: supplier.name, updatedAt: new Date().toISOString() } : expense
     );
     const catalog = data.catalog.map((item) => (item.supplierId === supplier.id ? { ...item, supplier: supplier.name } : item));
-    return persist({ ...data, suppliers, expenses, catalog }, exists ? "Fournisseur mis à jour" : "Fournisseur créé");
+    const purchaseInvoices = data.purchaseInvoices.map((invoice) =>
+      invoice.supplierId === supplier.id ? { ...invoice, supplier: supplier.name, updatedAt: new Date().toISOString() } : invoice
+    );
+    const purchaseOrders = data.purchaseOrders.map((order) =>
+      order.supplierId === supplier.id ? { ...order, supplier: supplier.name, updatedAt: new Date().toISOString() } : order
+    );
+    return persist(
+      { ...data, suppliers, expenses, catalog, purchaseInvoices, purchaseOrders },
+      exists ? "Fournisseur mis à jour" : "Fournisseur créé"
+    );
   }
 
   async function deleteSupplier(supplier: Supplier) {
@@ -1440,8 +1478,376 @@ export function App() {
       showPermissionNotice("Ce fournisseur est lié à un article du catalogue et ne peut pas être supprimé.");
       return false;
     }
+    if (data.purchaseInvoices.some((invoice) => invoice.supplierId === supplier.id)) {
+      showPermissionNotice("Ce fournisseur est utilisé par une facture d’achat et ne peut pas être supprimé.");
+      return false;
+    }
+    if (data.purchaseOrders.some((order) => order.supplierId === supplier.id)) {
+      showPermissionNotice("Ce fournisseur est utilisé par une commande fournisseur et ne peut pas être supprimé.");
+      return false;
+    }
     if (!confirmDestructiveAction(`Supprimer le fournisseur « ${supplier.name} » ?`)) return false;
     return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimé");
+  }
+
+  async function savePurchaseOrder(order: PurchaseOrder) {
+    if (!canManageCatalog || order.status !== "draft") {
+      showPermissionNotice("La gestion des commandes fournisseur est réservée aux administrateurs.");
+      return false;
+    }
+    const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
+    const normalized = { ...order, supplier: supplier?.name || order.supplier.trim(), status: "draft" as const };
+    const exists = data.purchaseOrders.some((entry) => entry.id === order.id);
+    const purchaseOrders = exists
+      ? data.purchaseOrders.map((entry) => (entry.id === order.id ? normalized : entry))
+      : [normalized, ...data.purchaseOrders];
+    return persist({ ...data, purchaseOrders }, exists ? "Commande mise à jour" : "Commande fournisseur créée");
+  }
+
+  async function emailPurchaseOrder(order: PurchaseOrder) {
+    if (!canManageCatalog) return false;
+    let supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
+    if (!supplier || !order.lines.length || order.lines.some((line) => !line.description.trim() || line.quantity <= 0)) {
+      showPermissionNotice("Renseignez le fournisseur et au moins une ligne valide.");
+      return false;
+    }
+    let email = supplier.email.trim();
+    if (!email) {
+      const entered = window.prompt(`Adresse email de ${supplier.name}`, "");
+      if (!entered?.trim()) {
+        showPermissionNotice("L’adresse email du fournisseur est nécessaire pour envoyer la commande.");
+        return false;
+      }
+      email = entered.trim();
+      supplier = { ...supplier, email, updatedAt: new Date().toISOString() };
+    }
+    const sent: PurchaseOrder = { ...order, supplier: supplier.name, status: "sent", updatedAt: new Date().toISOString() };
+    const exists = data.purchaseOrders.some((entry) => entry.id === sent.id);
+    const purchaseOrders = exists
+      ? data.purchaseOrders.map((entry) => (entry.id === sent.id ? sent : entry))
+      : [sent, ...data.purchaseOrders];
+    const suppliers = data.suppliers.map((entry) => (entry.id === supplier.id ? supplier : entry));
+    const saved = await persist({ ...data, suppliers, purchaseOrders }, "Commande prête à être envoyée");
+    if (!saved) return false;
+    try {
+      const result = await api.emailPdf({
+        html: renderPurchaseOrderHtml(sent, supplier, data.company),
+        defaultPath: `${sanitizeFileName(sent.number)}.pdf`,
+        to: email,
+        subject: `Bon de commande ${sent.number} - ${data.company.name || "Devix"}`,
+        body: `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${sent.number}.\n\nCordialement,\n${data.company.name || ""}`,
+      });
+      setNotice(result.opened && !result.fallback ? "Email prêt avec le bon de commande joint" : "Brouillon email préparé");
+      window.setTimeout(() => setNotice(""), 2200);
+      return result.opened;
+    } catch (error) {
+      console.error("Envoi du bon de commande impossible", error);
+      setNotice("Impossible d’ouvrir le brouillon email");
+      window.setTimeout(() => setNotice(""), 2200);
+      return false;
+    }
+  }
+
+  async function createInvoiceFromPurchaseOrder(order: PurchaseOrder) {
+    if (!canManageCatalog || order.status !== "sent" || order.invoiceId) return false;
+    const now = new Date().toISOString();
+    const invoice: PurchaseInvoice = {
+      id: makeId("purchase"),
+      supplierId: order.supplierId,
+      supplier: order.supplier,
+      reference: "",
+      invoiceDate: todayIso(),
+      dueDate: addDaysIso(todayIso(), 30),
+      status: "draft",
+      paymentMethod: "bank_transfer",
+      notes: `Commande ${order.number}`,
+      lines: order.lines.map((line) => ({ ...line, id: makeId("purchase-line") })),
+      attachments: [...order.attachments],
+      purchaseOrderId: order.id,
+      sourceOrder: { ...order, status: "sent", receivedAt: undefined, invoiceId: undefined },
+      createdAt: now,
+      updatedAt: now,
+    };
+    const receivedOrder: PurchaseOrder = { ...order, status: "received", receivedAt: now, invoiceId: invoice.id, updatedAt: now };
+    const supplierCatalog = data.catalog.map((item) => {
+      const line = order.lines.find((entry) => entry.catalogItemId === item.id);
+      return line ? { ...item, supplierId: order.supplierId, supplier: order.supplier, purchasePrice: line.unitPrice } : item;
+    });
+    return persist(
+      {
+        ...data,
+        purchaseInvoices: [invoice, ...data.purchaseInvoices],
+        purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
+        catalog: applyPurchaseOrderStockImpact(supplierCatalog, receivedOrder, "receive"),
+      },
+      "Commande transformée en facture : stock mis à jour"
+    );
+  }
+
+  async function selectPurchaseAttachments(ownerId: string) {
+    const result = await api.selectAttachments(ownerId);
+    if (result.canceled || !result.attachments.length) return [];
+    return workspace
+      ? Promise.all(result.attachments.map((attachment) => uploadRemoteAttachment(workspace, ownerId, attachment)))
+      : result.attachments;
+  }
+
+  async function addPurchaseOrderAttachments(order: PurchaseOrder) {
+    if (!canManageCatalog) return;
+    const attachments = await selectPurchaseAttachments(order.id);
+    if (!attachments.length) return;
+    await persist(
+      {
+        ...data,
+        purchaseOrders: data.purchaseOrders.map((entry) =>
+          entry.id === order.id
+            ? { ...order, attachments: [...order.attachments, ...attachments], updatedAt: new Date().toISOString() }
+            : entry
+        ),
+      },
+      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
+    );
+  }
+
+  async function addPurchaseInvoiceAttachments(invoice: PurchaseInvoice) {
+    if (!canManageCatalog) return;
+    const attachments = await selectPurchaseAttachments(invoice.id);
+    if (!attachments.length) return;
+    await persist(
+      {
+        ...data,
+        purchaseInvoices: data.purchaseInvoices.map((entry) =>
+          entry.id === invoice.id
+            ? { ...invoice, attachments: [...invoice.attachments, ...attachments], updatedAt: new Date().toISOString() }
+            : entry
+        ),
+      },
+      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
+    );
+  }
+
+  async function deletePurchaseAttachmentFile(attachment: DocumentAttachment) {
+    try {
+      if (workspace) await deleteRemoteAttachment(attachment);
+      else await api.deleteAttachment(attachment);
+    } catch (error) {
+      console.warn("Suppression pièce jointe impossible", error);
+    }
+  }
+
+  async function removePurchaseOrderAttachment(order: PurchaseOrder, attachment: DocumentAttachment) {
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
+    await deletePurchaseAttachmentFile(attachment);
+    await persist(
+      {
+        ...data,
+        purchaseOrders: data.purchaseOrders.map((entry) =>
+          entry.id === order.id
+            ? { ...order, attachments: order.attachments.filter((item) => item.id !== attachment.id), updatedAt: new Date().toISOString() }
+            : entry
+        ),
+      },
+      "Pièce jointe supprimée"
+    );
+  }
+
+  async function removePurchaseInvoiceAttachment(invoice: PurchaseInvoice, attachment: DocumentAttachment) {
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
+    await deletePurchaseAttachmentFile(attachment);
+    await persist(
+      {
+        ...data,
+        purchaseInvoices: data.purchaseInvoices.map((entry) =>
+          entry.id === invoice.id
+            ? {
+                ...invoice,
+                attachments: invoice.attachments.filter((item) => item.id !== attachment.id),
+                updatedAt: new Date().toISOString(),
+              }
+            : entry
+        ),
+      },
+      "Pièce jointe supprimée"
+    );
+  }
+
+  async function deletePurchaseOrder(order: PurchaseOrder) {
+    if (!canManageCatalog) return false;
+    if (order.invoiceId) {
+      showPermissionNotice("Supprimez d’abord la facture associée à cette commande.");
+      return false;
+    }
+    const impact = order.status === "received" ? " Le stock sera corrigé." : "";
+    if (!confirmDestructiveAction(`Supprimer la commande « ${order.number} » ?${impact}`)) return false;
+    await Promise.all(order.attachments.map(deletePurchaseAttachmentFile));
+    return persist(
+      {
+        ...data,
+        purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
+        catalog: order.status === "received" ? applyPurchaseOrderStockImpact(data.catalog, order, "cancel") : data.catalog,
+      },
+      "Commande fournisseur supprimée"
+    );
+  }
+
+  async function exportPurchaseOrderPdf(order: PurchaseOrder) {
+    const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
+    const result = await api.savePdf({
+      html: renderPurchaseOrderHtml(order, supplier, data.company),
+      defaultPath: `${sanitizeFileName(order.number)}.pdf`,
+    });
+    if (!result.canceled) setNotice("Bon de commande fournisseur exporté");
+    window.setTimeout(() => setNotice(""), 1800);
+  }
+
+  async function savePurchaseInvoice(invoice: PurchaseInvoice) {
+    if (!canManageCatalog || invoice.status === "posted") {
+      showPermissionNotice("La gestion des achats et du stock est réservée aux administrateurs.");
+      return false;
+    }
+    const supplier = data.suppliers.find((entry) => entry.id === invoice.supplierId);
+    const normalized = { ...invoice, supplier: supplier?.name || invoice.supplier.trim(), status: "draft" as const };
+    const exists = data.purchaseInvoices.some((entry) => entry.id === invoice.id);
+    const purchaseInvoices = exists
+      ? data.purchaseInvoices.map((entry) => (entry.id === invoice.id ? normalized : entry))
+      : [normalized, ...data.purchaseInvoices];
+    return persist({ ...data, purchaseInvoices }, exists ? "Brouillon mis à jour" : "Facture d’achat créée");
+  }
+
+  async function postPurchaseInvoice(invoice: PurchaseInvoice) {
+    if (!canManageCatalog) {
+      showPermissionNotice("La validation des achats et du stock est réservée aux administrateurs.");
+      return false;
+    }
+    const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
+    if (stored?.status === "posted") return false;
+    const supplier = data.suppliers.find((entry) => entry.id === invoice.supplierId);
+    const normalized = { ...invoice, supplier: supplier?.name || invoice.supplier.trim() };
+    const totals = purchaseInvoiceTotals(normalized);
+    if (!normalized.supplierId || !normalized.reference.trim() || totals.totalHt <= 0 || !normalized.lines.length) {
+      showPermissionNotice("Renseignez le fournisseur, la référence et au moins une ligne avec un montant positif.");
+      return false;
+    }
+    const duplicate = data.purchaseInvoices.some(
+      (entry) =>
+        entry.id !== invoice.id &&
+        entry.supplierId === invoice.supplierId &&
+        entry.reference.trim().toLocaleLowerCase("fr") === invoice.reference.trim().toLocaleLowerCase("fr")
+    );
+    if (duplicate) {
+      showPermissionNotice("Une facture de ce fournisseur porte déjà cette référence.");
+      return false;
+    }
+    const expense = purchaseInvoiceExpense(normalized);
+    const posted: PurchaseInvoice = {
+      ...normalized,
+      status: "posted",
+      expenseId: expense.id,
+      postedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const purchaseInvoices = stored
+      ? data.purchaseInvoices.map((entry) => (entry.id === posted.id ? posted : entry))
+      : [posted, ...data.purchaseInvoices];
+    return persist(
+      {
+        ...data,
+        purchaseInvoices,
+        expenses: [expense, ...data.expenses.filter((entry) => entry.purchaseInvoiceId !== posted.id)],
+        catalog: posted.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, posted, "post"),
+      },
+      "Facture validée : comptes et stock mis à jour"
+    );
+  }
+
+  async function cancelPurchaseInvoice(invoice: PurchaseInvoice) {
+    if (!canManageCatalog) {
+      showPermissionNotice("L’annulation d’un achat est réservée aux administrateurs.");
+      return false;
+    }
+    const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
+    if (!stored || stored.status !== "posted") return false;
+    if (!confirmDestructiveAction(`Annuler la validation de la facture « ${stored.reference} » ? Le stock et les comptes seront corrigés.`))
+      return false;
+    const draft: PurchaseInvoice = {
+      ...stored,
+      status: "draft",
+      expenseId: undefined,
+      postedAt: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    return persist(
+      {
+        ...data,
+        purchaseInvoices: data.purchaseInvoices.map((entry) => (entry.id === stored.id ? draft : entry)),
+        expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
+        catalog: stored.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel"),
+      },
+      "Validation annulée : comptes et stock corrigés"
+    );
+  }
+
+  async function deletePurchaseInvoice(invoice: PurchaseInvoice) {
+    if (!canManageCatalog) {
+      showPermissionNotice("La suppression des achats est réservée aux administrateurs.");
+      return false;
+    }
+    const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
+    if (!stored) return false;
+    if (stored.sourceOrder) {
+      showPermissionNotice(
+        "Cette facture provient d’un bon de commande. Utilisez « Revenir au bon de commande » pour conserver l’historique."
+      );
+      return false;
+    }
+    const impact = stored.status === "posted" ? " Le stock et les comptes seront corrigés." : "";
+    if (!confirmDestructiveAction(`Supprimer la facture d’achat « ${stored.reference || "sans référence"} » ?${impact}`)) return false;
+    await Promise.all(stored.attachments.map(deletePurchaseAttachmentFile));
+    return persist(
+      {
+        ...data,
+        purchaseInvoices: data.purchaseInvoices.filter((entry) => entry.id !== stored.id),
+        purchaseOrders: data.purchaseOrders.map((order) =>
+          order.invoiceId === stored.id ? { ...order, invoiceId: undefined, updatedAt: new Date().toISOString() } : order
+        ),
+        expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
+        catalog:
+          stored.status === "posted" && !stored.purchaseOrderId
+            ? applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel")
+            : data.catalog,
+      },
+      "Facture d’achat supprimée"
+    );
+  }
+
+  async function restorePurchaseOrderFromInvoice(invoice: PurchaseInvoice) {
+    if (!canManageCatalog || !invoice.sourceOrder) return false;
+    const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
+    if (!stored?.sourceOrder) return false;
+    if (
+      !confirmDestructiveAction(
+        `Revenir au bon de commande ${stored.sourceOrder.number} ? La facture sera retirée et le stock sera corrigé.`
+      )
+    )
+      return false;
+    const restored: PurchaseOrder = {
+      ...stored.sourceOrder,
+      status: "sent",
+      receivedAt: undefined,
+      invoiceId: undefined,
+      attachments: [...stored.attachments],
+      updatedAt: new Date().toISOString(),
+    };
+    return persist(
+      {
+        ...data,
+        purchaseInvoices: data.purchaseInvoices.filter((entry) => entry.id !== stored.id),
+        purchaseOrders: [restored, ...data.purchaseOrders.filter((entry) => entry.id !== restored.id)],
+        expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
+        catalog: applyPurchaseOrderStockImpact(data.catalog, restored, "cancel"),
+      },
+      `Bon de commande ${restored.number} restauré`
+    );
   }
 
   function chooseLogoFile() {
@@ -1539,6 +1945,9 @@ export function App() {
           </button>
           <button className={view === "accounting" ? "active" : ""} onClick={() => setView("accounting")}>
             <BookOpenCheck size={18} /> Comptes
+          </button>
+          <button className={view === "purchases" ? "active" : ""} onClick={() => setView("purchases")}>
+            <ShoppingCart size={18} /> Achats
           </button>
           <button className={view === "suppliers" ? "active" : ""} onClick={() => setView("suppliers")}>
             <Truck size={18} /> Fournisseurs
@@ -1684,6 +2093,32 @@ export function App() {
             onDeleteExpense={deleteExpense}
             onExportPdf={exportAccountingPdf}
             onExportExcel={exportAccountingExcel}
+          />
+        )}
+
+        {view === "purchases" && (
+          <PurchasesView
+            orders={data.purchaseOrders}
+            invoices={data.purchaseInvoices}
+            suppliers={data.suppliers}
+            catalog={data.catalog}
+            defaultVatRate={data.company.defaultVatRate}
+            readOnly={!canManageCatalog}
+            onSaveOrder={savePurchaseOrder}
+            onEmailOrder={emailPurchaseOrder}
+            onCreateInvoice={createInvoiceFromPurchaseOrder}
+            onDeleteOrder={deletePurchaseOrder}
+            onExportOrderPdf={exportPurchaseOrderPdf}
+            onSaveInvoice={savePurchaseInvoice}
+            onPostInvoice={postPurchaseInvoice}
+            onCancelInvoice={cancelPurchaseInvoice}
+            onDeleteInvoice={deletePurchaseInvoice}
+            onRestoreOrder={restorePurchaseOrderFromInvoice}
+            onAddOrderAttachment={addPurchaseOrderAttachments}
+            onRemoveOrderAttachment={removePurchaseOrderAttachment}
+            onAddInvoiceAttachment={addPurchaseInvoiceAttachments}
+            onRemoveInvoiceAttachment={removePurchaseInvoiceAttachment}
+            onOpenAttachment={openDocumentAttachment}
           />
         )}
 

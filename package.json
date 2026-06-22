@@ -1,6 +1,6 @@
 {
   "name": "devix",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Logiciel de gestion de devis, bons de commande et factures.",
   "main": "electron/main.cjs",
   "type": "commonjs",

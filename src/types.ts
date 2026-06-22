@@ -101,6 +101,58 @@ export interface BusinessExpense {
   amountHt: number;
   vatRate: number;
   paymentMethod: PaymentMethod;
+  purchaseInvoiceId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PurchaseInvoiceStatus = "draft" | "posted";
+
+export interface PurchaseInvoiceLine {
+  id: string;
+  catalogItemId?: string;
+  description: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  vatRate: number;
+}
+
+export interface PurchaseInvoice {
+  id: string;
+  supplierId: string;
+  supplier: string;
+  reference: string;
+  invoiceDate: string;
+  dueDate: string;
+  status: PurchaseInvoiceStatus;
+  paymentMethod: PaymentMethod;
+  notes: string;
+  lines: PurchaseInvoiceLine[];
+  attachments: DocumentAttachment[];
+  expenseId?: string;
+  purchaseOrderId?: string;
+  sourceOrder?: PurchaseOrder;
+  postedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PurchaseOrderStatus = "draft" | "sent" | "received";
+
+export interface PurchaseOrder {
+  id: string;
+  number: string;
+  supplierId: string;
+  supplier: string;
+  orderDate: string;
+  expectedDate: string;
+  status: PurchaseOrderStatus;
+  notes: string;
+  lines: PurchaseInvoiceLine[];
+  attachments: DocumentAttachment[];
+  receivedAt?: string;
+  invoiceId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -211,4 +263,6 @@ export interface AppData {
   catalog: CatalogItem[];
   expenses: BusinessExpense[];
   suppliers: Supplier[];
+  purchaseInvoices: PurchaseInvoice[];
+  purchaseOrders: PurchaseOrder[];
 }

@@ -13,6 +13,9 @@ import type {
   LineItem,
   PaymentEntry,
   PaymentMethod,
+  PurchaseInvoice,
+  PurchaseInvoiceLine,
+  PurchaseOrder,
   PaymentReminder,
   Supplier,
 } from "./types";
@@ -158,6 +161,8 @@ export function createDefaultAppData(): AppData {
     catalog: defaultCatalog.map((item) => ({ ...item })),
     expenses: [],
     suppliers: [],
+    purchaseInvoices: [],
+    purchaseOrders: [],
   };
 }
 
@@ -192,8 +197,66 @@ function normalizeExpense(expense: Partial<BusinessExpense>): BusinessExpense {
     amountHt: normalizeNumber(expense.amountHt, 0),
     vatRate: normalizeNumber(expense.vatRate, defaultCompany.defaultVatRate),
     paymentMethod: normalizePaymentMethod(expense.paymentMethod),
+    purchaseInvoiceId: expense.purchaseInvoiceId,
     createdAt: expense.createdAt || now,
     updatedAt: expense.updatedAt || now,
+  };
+}
+
+function normalizePurchaseInvoiceLine(line: Partial<PurchaseInvoiceLine>, defaultVatRate: number): PurchaseInvoiceLine {
+  return {
+    id: line.id || makeId("purchase-line"),
+    catalogItemId: line.catalogItemId,
+    description: line.description || "",
+    unit: line.unit || "u",
+    quantity: normalizeNumber(line.quantity, 1),
+    unitPrice: normalizeNumber(line.unitPrice, 0),
+    vatRate: normalizeNumber(line.vatRate, defaultVatRate),
+  };
+}
+
+function normalizePurchaseInvoice(invoice: Partial<PurchaseInvoice>, defaultVatRate: number): PurchaseInvoice {
+  const now = new Date().toISOString();
+  const invoiceDate = invoice.invoiceDate || todayIso();
+  return {
+    id: invoice.id || makeId("purchase"),
+    supplierId: invoice.supplierId || "",
+    supplier: invoice.supplier || "",
+    reference: invoice.reference || "",
+    invoiceDate,
+    dueDate: invoice.dueDate || addDaysIso(invoiceDate, 30),
+    status: invoice.status === "posted" ? "posted" : "draft",
+    paymentMethod: normalizePaymentMethod(invoice.paymentMethod),
+    notes: invoice.notes || "",
+    lines: Array.isArray(invoice.lines) ? invoice.lines.map((line) => normalizePurchaseInvoiceLine(line, defaultVatRate)) : [],
+    attachments: normalizeAttachments(invoice.attachments),
+    expenseId: invoice.expenseId,
+    purchaseOrderId: invoice.purchaseOrderId,
+    sourceOrder: invoice.sourceOrder ? normalizePurchaseOrder(invoice.sourceOrder, defaultVatRate) : undefined,
+    postedAt: invoice.postedAt,
+    createdAt: invoice.createdAt || now,
+    updatedAt: invoice.updatedAt || now,
+  };
+}
+
+function normalizePurchaseOrder(order: Partial<PurchaseOrder>, defaultVatRate: number): PurchaseOrder {
+  const now = new Date().toISOString();
+  const orderDate = order.orderDate || todayIso();
+  return {
+    id: order.id || makeId("purchase-order"),
+    number: order.number || "BCF-0000",
+    supplierId: order.supplierId || "",
+    supplier: order.supplier || "",
+    orderDate,
+    expectedDate: order.expectedDate || addDaysIso(orderDate, 14),
+    status: order.status === "received" ? "received" : order.status === "sent" ? "sent" : "draft",
+    notes: order.notes || "",
+    lines: Array.isArray(order.lines) ? order.lines.map((line) => normalizePurchaseInvoiceLine(line, defaultVatRate)) : [],
+    attachments: normalizeAttachments(order.attachments),
+    receivedAt: order.receivedAt,
+    invoiceId: order.invoiceId,
+    createdAt: order.createdAt || now,
+    updatedAt: order.updatedAt || now,
   };
 }
 
@@ -433,5 +496,19 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     catalog,
     expenses: Array.isArray(input?.expenses) ? input.expenses.map(normalizeExpense) : fallback.expenses,
     suppliers,
+    purchaseInvoices: Array.isArray(input?.purchaseInvoices)
+      ? input.purchaseInvoices.map((invoice) => {
+          const normalized = normalizePurchaseInvoice(invoice, company.defaultVatRate);
+          const supplier = suppliers.find((entry) => entry.id === normalized.supplierId);
+          return supplier ? { ...normalized, supplier: supplier.name } : normalized;
+        })
+      : fallback.purchaseInvoices,
+    purchaseOrders: Array.isArray(input?.purchaseOrders)
+      ? input.purchaseOrders.map((order) => {
+          const normalized = normalizePurchaseOrder(order, company.defaultVatRate);
+          const supplier = suppliers.find((entry) => entry.id === normalized.supplierId);
+          return supplier ? { ...normalized, supplier: supplier.name } : normalized;
+        })
+      : fallback.purchaseOrders,
   };
 }

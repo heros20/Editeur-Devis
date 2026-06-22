@@ -68,6 +68,8 @@ const defaultData = {
   catalog: [],
   expenses: [],
   suppliers: [],
+  purchaseInvoices: [],
+  purchaseOrders: [],
 };
 
 function getDataPath() {
@@ -241,6 +243,8 @@ async function readStore() {
     catalog: Array.isArray(parsed.catalog) ? parsed.catalog : defaultData.catalog,
     expenses: Array.isArray(parsed.expenses) ? parsed.expenses : defaultData.expenses,
     suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : defaultData.suppliers,
+    purchaseInvoices: Array.isArray(parsed.purchaseInvoices) ? parsed.purchaseInvoices : defaultData.purchaseInvoices,
+    purchaseOrders: Array.isArray(parsed.purchaseOrders) ? parsed.purchaseOrders : defaultData.purchaseOrders,
   };
 }
 
