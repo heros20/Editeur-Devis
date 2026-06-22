@@ -66,6 +66,8 @@ const defaultData = {
   clients: [],
   documents: [],
   catalog: [],
+  expenses: [],
+  suppliers: [],
 };
 
 function getDataPath() {
@@ -237,6 +239,8 @@ async function readStore() {
     clients: Array.isArray(parsed.clients) ? parsed.clients : [],
     documents: Array.isArray(parsed.documents) ? parsed.documents : [],
     catalog: Array.isArray(parsed.catalog) ? parsed.catalog : defaultData.catalog,
+    expenses: Array.isArray(parsed.expenses) ? parsed.expenses : defaultData.expenses,
+    suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : defaultData.suppliers,
   };
 }
 
@@ -644,6 +648,16 @@ ipcMain.handle("dialog:save-pdf", async (_event, { html, defaultPath }) => {
 
   await createPdfFile(html, target.filePath);
   shell.showItemInFolder(target.filePath);
+  return { canceled: false, filePath: target.filePath };
+});
+
+ipcMain.handle("dialog:save-excel", async (_event, { bytes, defaultPath }) => {
+  const target = await dialog.showSaveDialog(mainWindow, {
+    defaultPath,
+    filters: [{ name: "Classeur Excel", extensions: ["xlsx"] }],
+  });
+  if (target.canceled || !target.filePath) return { canceled: true };
+  await fs.writeFile(target.filePath, Buffer.from(bytes));
   return { canceled: false, filePath: target.filePath };
 });
 

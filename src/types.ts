@@ -41,6 +41,22 @@ export interface Client {
   createdAt: string;
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  siret: string;
+  vatNumber: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LineItem {
   id: string;
   catalogItemId?: string;
@@ -72,6 +88,21 @@ export interface PaymentEntry {
   paidAt: string;
   note: string;
   createdAt: string;
+}
+
+export interface BusinessExpense {
+  id: string;
+  date: string;
+  supplier: string;
+  supplierId?: string;
+  reference: string;
+  category: string;
+  description: string;
+  amountHt: number;
+  vatRate: number;
+  paymentMethod: PaymentMethod;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PaymentReminder {
@@ -157,6 +188,7 @@ export interface CatalogItem {
   stockMinimum: number;
   stockUnit: string;
   supplier: string;
+  supplierId?: string;
   location: string;
   stockMovements: StockMovement[];
 }
@@ -177,4 +209,6 @@ export interface AppData {
   clients: Client[];
   documents: BusinessDocument[];
   catalog: CatalogItem[];
+  expenses: BusinessExpense[];
+  suppliers: Supplier[];
 }

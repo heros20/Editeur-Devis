@@ -8,6 +8,7 @@ export interface AtelierApi {
   nextNumber: (type: DocumentType | "client") => Promise<string>;
   uuid: () => Promise<string>;
   savePdf: (payload: { html: string; defaultPath: string }) => Promise<{ canceled: boolean; filePath?: string }>;
+  saveExcel: (payload: { bytes: Uint8Array; defaultPath: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   exportJson: (data: AppData) => Promise<{ canceled: boolean; filePath?: string }>;
   openEmail: (payload: { to?: string; subject: string; body: string }) => Promise<{ opened: boolean }>;
   openExternal: (url: string) => Promise<{ opened: boolean }>;
@@ -46,6 +47,20 @@ function downloadBlob(content: string, fileName: string, type: string) {
   const extension = dot > 0 ? fileName.slice(dot) : "";
   link.href = url;
   link.download = sanitizeFileName(base) + extension;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBinary(content: Uint8Array, fileName: string, type: string) {
+  const bytes = new Uint8Array(content.byteLength);
+  bytes.set(content);
+  const blob = new Blob([bytes.buffer], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
   document.body.append(link);
   link.click();
   link.remove();
@@ -121,6 +136,10 @@ const browserApi: AtelierApi = {
     printWindow.document.close();
     printWindow.focus();
     window.setTimeout(() => printWindow.print(), 250);
+    return { canceled: false, filePath: defaultPath };
+  },
+  async saveExcel({ bytes, defaultPath }) {
+    downloadBinary(bytes, defaultPath, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     return { canceled: false, filePath: defaultPath };
   },
   async exportJson(data) {

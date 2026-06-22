@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Building2,
+  BookOpenCheck,
   Check,
   ChevronRight,
   Clipboard,
@@ -25,12 +26,17 @@ import {
   Search,
   Settings,
   Trash2,
+  Truck,
   UserPlus,
   Users,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { applyDocumentStockImpact, creditLines, makeDocumentSnapshot } from "./businessLogic";
+import { AccountingView } from "./AccountingView";
+import { SuppliersView } from "./SuppliersView";
+import { buildAccountingReport, type AccountingPeriod } from "./accounting";
+import { buildAccountingXlsx, renderAccountingHtml } from "./accountingExport";
 import { createDefaultAppData, normalizeData } from "./defaultData";
 import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { buildPaymentReminderEmail } from "./reminderEmail";
@@ -67,6 +73,7 @@ import {
 } from "./supabaseStore";
 import type {
   AppData,
+  BusinessExpense,
   BusinessDocument,
   CatalogItem,
   Client,
@@ -80,6 +87,7 @@ import type {
   PaymentMethod,
   PaymentReminder,
   StockMovement,
+  Supplier,
 } from "./types";
 import {
   addDaysIso,
@@ -100,7 +108,7 @@ import {
   withPaymentStatus,
 } from "./utils";
 
-type View = "dashboard" | "documents" | "documentDetail" | "catalog" | "clients" | "company" | "settings";
+type View = "dashboard" | "documents" | "documentDetail" | "accounting" | "suppliers" | "catalog" | "clients" | "company" | "settings";
 type AuthMode = "signin" | "signup";
 type ReminderDraft = Pick<PaymentReminder, "sentAt" | "channel" | "note">;
 type ReminderSendResult = { success: boolean; message: string };
@@ -191,6 +199,7 @@ const emptyCatalogItem = (vatRate = 20): CatalogItem => ({
   stockMinimum: 0,
   stockUnit: "",
   supplier: "",
+  supplierId: undefined,
   location: "",
   stockMovements: [],
 });
@@ -813,6 +822,8 @@ export function App() {
     if (view === "documentDetail" && selectedDoc) return `${labels[selectedDoc.type]} ${selectedDoc.number}`;
     if (view === "documentDetail") return "Document";
     if (view === "catalog") return "Catalogue";
+    if (view === "accounting") return "Livre de comptes";
+    if (view === "suppliers") return "Fournisseurs";
     if (view === "clients") return "Dossiers clients";
     if (view === "company") return "Informations société";
     return "Paramètres";
@@ -1361,6 +1372,78 @@ export function App() {
     });
   }
 
+  async function exportAccountingPdf(period: AccountingPeriod) {
+    const report = buildAccountingReport(data, period);
+    const result = await api.savePdf({
+      html: renderAccountingHtml(report, data.company),
+      defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.pdf`,
+    });
+    if (!result.canceled) {
+      setNotice("Livre de comptes PDF exporté");
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
+  async function exportAccountingExcel(period: AccountingPeriod) {
+    const report = buildAccountingReport(data, period);
+    const result = await api.saveExcel({
+      bytes: buildAccountingXlsx(report, data.company),
+      defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.xlsx`,
+    });
+    if (!result.canceled) {
+      setNotice("Livre de comptes Excel exporté");
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
+
+  async function createExpense(expense: BusinessExpense) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return false;
+    }
+    return persist({ ...data, expenses: [expense, ...data.expenses] }, "Dépense enregistrée");
+  }
+
+  async function deleteExpense(expense: BusinessExpense) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return;
+    }
+    if (!confirmDestructiveAction(`Supprimer la dépense « ${expense.description} » ?`)) return;
+    await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "Dépense supprimée");
+  }
+
+  async function saveSupplier(supplier: Supplier) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return false;
+    }
+    const exists = data.suppliers.some((item) => item.id === supplier.id);
+    const suppliers = exists ? data.suppliers.map((item) => (item.id === supplier.id ? supplier : item)) : [supplier, ...data.suppliers];
+    const expenses = data.expenses.map((expense) =>
+      expense.supplierId === supplier.id ? { ...expense, supplier: supplier.name, updatedAt: new Date().toISOString() } : expense
+    );
+    const catalog = data.catalog.map((item) => (item.supplierId === supplier.id ? { ...item, supplier: supplier.name } : item));
+    return persist({ ...data, suppliers, expenses, catalog }, exists ? "Fournisseur mis à jour" : "Fournisseur créé");
+  }
+
+  async function deleteSupplier(supplier: Supplier) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accès est en lecture seule.");
+      return false;
+    }
+    if (data.expenses.some((expense) => expense.supplierId === supplier.id)) {
+      showPermissionNotice("Ce fournisseur est utilisé par une dépense et ne peut pas être supprimé.");
+      return false;
+    }
+    if (data.catalog.some((item) => item.supplierId === supplier.id)) {
+      showPermissionNotice("Ce fournisseur est lié à un article du catalogue et ne peut pas être supprimé.");
+      return false;
+    }
+    if (!confirmDestructiveAction(`Supprimer le fournisseur « ${supplier.name} » ?`)) return false;
+    return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimé");
+  }
+
   function chooseLogoFile() {
     return new Promise<File | null>((resolve) => {
       const input = document.createElement("input");
@@ -1453,6 +1536,12 @@ export function App() {
             onClick={() => setView("clients")}
           >
             <Users size={18} /> Clients
+          </button>
+          <button className={view === "accounting" ? "active" : ""} onClick={() => setView("accounting")}>
+            <BookOpenCheck size={18} /> Comptes
+          </button>
+          <button className={view === "suppliers" ? "active" : ""} onClick={() => setView("suppliers")}>
+            <Truck size={18} /> Fournisseurs
           </button>
           {canManageCatalog && (
             <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>
@@ -1587,6 +1676,28 @@ export function App() {
           </section>
         )}
 
+        {view === "accounting" && (
+          <AccountingView
+            data={data}
+            readOnly={!canEditOperations}
+            onCreateExpense={createExpense}
+            onDeleteExpense={deleteExpense}
+            onExportPdf={exportAccountingPdf}
+            onExportExcel={exportAccountingExcel}
+          />
+        )}
+
+        {view === "suppliers" && (
+          <SuppliersView
+            suppliers={data.suppliers}
+            catalog={data.catalog}
+            expenses={data.expenses}
+            readOnly={!canEditOperations}
+            onSave={saveSupplier}
+            onDelete={deleteSupplier}
+          />
+        )}
+
         {view === "documents" && (
           <section className="documentLayout">
             <aside className="listPane">
@@ -1712,7 +1823,13 @@ export function App() {
         )}
 
         {view === "catalog" && (
-          <CatalogManager items={sortedCatalog} onCreate={createCatalogItem} onChange={updateCatalogItem} onDelete={deleteCatalogItem} />
+          <CatalogManager
+            items={sortedCatalog}
+            suppliers={data.suppliers}
+            onCreate={createCatalogItem}
+            onChange={updateCatalogItem}
+            onDelete={deleteCatalogItem}
+          />
         )}
 
         {view === "clients" && (
@@ -3305,11 +3422,13 @@ function DocumentPreview({ doc, client, sums }: { doc: BusinessDocument; client?
 
 function CatalogManager({
   items,
+  suppliers,
   onCreate,
   onChange,
   onDelete,
 }: {
   items: CatalogItem[];
+  suppliers: Supplier[];
   onCreate: () => void;
   onChange: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
@@ -3529,11 +3648,22 @@ function CatalogManager({
                     </div>
                     <label>
                       Fournisseur
-                      <input
-                        placeholder="Nom fournisseur"
-                        value={item.supplier}
-                        onChange={(event) => patch(item, { supplier: event.target.value })}
-                      />
+                      <select
+                        value={item.supplierId || ""}
+                        onChange={(event) => {
+                          const supplier = suppliers.find((entry) => entry.id === event.target.value);
+                          patch(item, { supplierId: supplier?.id, supplier: supplier?.name || "" });
+                        }}
+                      >
+                        <option value="">Non rattaché</option>
+                        {[...suppliers]
+                          .sort((a, b) => a.name.localeCompare(b.name, "fr"))
+                          .map((supplier) => (
+                            <option key={supplier.id} value={supplier.id}>
+                              {supplier.name}
+                            </option>
+                          ))}
+                      </select>
                     </label>
                     <label>
                       Emplacement

@@ -420,6 +420,476 @@ textarea:disabled {
   gap: 14px;
 }
 
+.accountingPage {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.accountingToolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+}
+
+.periodFields,
+.accountingExports {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.periodFields label {
+  display: grid;
+  gap: 5px;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.periodFields input,
+.periodFields select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--theme-text);
+}
+
+.accountingKpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.accountingKpis article {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 5px 16px rgba(34, 48, 43, 0.04);
+}
+
+.accountingKpis span,
+.accountingKpis small {
+  display: block;
+  color: var(--theme-muted);
+}
+
+.accountingKpis span {
+  min-height: 30px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.accountingKpis strong {
+  display: block;
+  margin: 5px 0;
+  color: var(--theme-primary-dark);
+  font-size: clamp(19px, 2vw, 27px);
+  white-space: nowrap;
+}
+
+.accountingKpis small {
+  font-size: 11px;
+}
+
+.accountingGrid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(560px, 1.6fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.accountingMonthly,
+.accountingDetails {
+  min-width: 0;
+  padding: 16px;
+}
+
+.accountingTableWrap {
+  overflow: auto;
+  max-height: 52vh;
+  margin-top: 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 7px;
+}
+
+.accountingTableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.accountingTableWrap th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 9px 10px;
+  background: var(--theme-primary-dark);
+  color: white;
+  text-align: left;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.accountingTableWrap td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--theme-border);
+  text-align: right;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.accountingTableWrap td:first-child,
+.accountingTableWrap .accountingPrimary {
+  text-align: left;
+}
+
+.accountingTableWrap td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--theme-muted);
+  font-size: 10px;
+}
+
+.accountingTableWrap tbody tr:hover {
+  background: var(--theme-soft);
+}
+
+.accountingTableWrap .positive {
+  color: #1f6b45;
+  font-weight: 800;
+}
+
+.accountingTableWrap .negative {
+  color: #a33b31;
+  font-weight: 800;
+}
+
+.accountingTableWrap .accountingEmpty {
+  padding: 24px;
+  color: var(--theme-muted);
+  text-align: center;
+}
+
+.accountingCount {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.accountingDisclaimer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--theme-muted);
+  font-size: 12px;
+}
+
+.expensePanel {
+  min-width: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.expenseForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-soft);
+}
+
+.expenseForm label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--theme-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.expenseForm input,
+.expenseForm select {
+  min-width: 0;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--theme-text);
+}
+
+.expenseForm button {
+  white-space: nowrap;
+}
+
+.expenseTableWrap {
+  max-height: 36vh;
+}
+
+.expenseDelete {
+  min-height: 30px;
+  width: 30px;
+  padding: 0;
+  background: #9b2f25;
+}
+
+.supplierLayout {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.supplierListPane,
+.supplierEditor {
+  min-width: 0;
+  padding: 16px;
+}
+
+.supplierAdd {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.supplierList {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+}
+
+.supplierCard {
+  min-height: 78px;
+  display: block;
+  padding: 12px;
+  border: 1px solid var(--theme-border);
+  background: white;
+  color: var(--theme-text);
+  text-align: left;
+}
+
+.supplierCard.selected {
+  border-color: var(--theme-primary);
+  background: var(--theme-soft);
+  box-shadow: inset 3px 0 var(--theme-primary);
+}
+
+.supplierCard strong,
+.supplierCard span,
+.supplierCard small {
+  display: block;
+}
+
+.supplierCard span,
+.supplierCard small {
+  margin-top: 4px;
+  color: var(--theme-muted);
+  font-size: 11px;
+}
+
+.supplierFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.supplierFormGrid label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.supplierFormGrid input,
+.supplierFormGrid textarea {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--theme-text);
+}
+
+.supplierFormGrid textarea {
+  resize: vertical;
+}
+
+.supplierFormGrid .wide,
+.supplierFormGrid .full {
+  grid-column: 1 / -1;
+}
+
+.supplierRelations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.supplierRelations div {
+  padding: 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 7px;
+  background: var(--theme-soft);
+}
+
+.supplierRelations span,
+.supplierRelations strong {
+  display: block;
+}
+
+.supplierRelations span {
+  color: var(--theme-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.supplierRelations strong {
+  margin-top: 5px;
+  color: var(--theme-primary-dark);
+  font-size: 20px;
+}
+
+.supplierLinkedData {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.supplierLinkedData section {
+  padding: 13px;
+  border: 1px solid var(--theme-border);
+  border-radius: 7px;
+}
+
+.supplierLinkedData section > div {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.supplierLinkedData section > div > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.supplierLinkedData small {
+  color: var(--theme-muted);
+}
+
+.accountingModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 29, 25, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.accountingExportModal {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 25px;
+  border: 1px solid var(--theme-border);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 24px 70px rgba(16, 29, 25, 0.3);
+}
+
+.accountingExportModal h2 {
+  margin-top: 6px;
+}
+
+.accountingExportModal p {
+  margin: 10px 36px 20px 0;
+  color: var(--theme-muted);
+  line-height: 1.55;
+}
+
+.accountingModalClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  min-height: 34px;
+  width: 34px;
+  padding: 0;
+  border: 1px solid var(--theme-border);
+  background: white;
+  color: var(--theme-text);
+}
+
+.accountingModalActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.accountingModalActions button {
+  min-height: 48px;
+}
+
+@media (max-width: 1300px) {
+  .accountingKpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .accountingGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .accountingToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .accountingKpis {
+    grid-template-columns: 1fr;
+  }
+  .accountingModalActions {
+    grid-template-columns: 1fr;
+  }
+  .expenseForm {
+    grid-template-columns: 1fr;
+  }
+  .supplierLayout,
+  .supplierFormGrid,
+  .supplierRelations,
+  .supplierLinkedData {
+    grid-template-columns: 1fr;
+  }
+}
+
 .kpi,
 .panel,
 .editor,
@@ -1543,6 +2013,16 @@ textarea {
   border: 1px solid var(--theme-border);
   border-radius: 5px;
   background: var(--theme-soft);
+  color: var(--theme-text);
+}
+
+.stockFields select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: 5px;
+  background: white;
   color: var(--theme-text);
 }
 

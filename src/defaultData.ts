@@ -1,5 +1,6 @@
 import type {
   AppData,
+  BusinessExpense,
   BusinessDocument,
   CatalogItem,
   Client,
@@ -13,6 +14,7 @@ import type {
   PaymentEntry,
   PaymentMethod,
   PaymentReminder,
+  Supplier,
 } from "./types";
 import { addDaysIso, makeId, todayIso } from "./utils";
 import { defaultThemeId, isThemeId } from "./themes";
@@ -154,6 +156,8 @@ export function createDefaultAppData(): AppData {
     clients: [],
     documents: [],
     catalog: defaultCatalog.map((item) => ({ ...item })),
+    expenses: [],
+    suppliers: [],
   };
 }
 
@@ -173,6 +177,43 @@ function normalizeDocumentStatus(value: unknown): DocumentStatus {
 
 function normalizePaymentMethod(value: unknown): PaymentMethod {
   return value === "check" || value === "cash" || value === "card" || value === "other" ? value : "bank_transfer";
+}
+
+function normalizeExpense(expense: Partial<BusinessExpense>): BusinessExpense {
+  const now = new Date().toISOString();
+  return {
+    id: expense.id || makeId("expense"),
+    date: expense.date || todayIso(),
+    supplier: expense.supplier || "",
+    supplierId: expense.supplierId,
+    reference: expense.reference || "",
+    category: expense.category || "Autre",
+    description: expense.description || "",
+    amountHt: normalizeNumber(expense.amountHt, 0),
+    vatRate: normalizeNumber(expense.vatRate, defaultCompany.defaultVatRate),
+    paymentMethod: normalizePaymentMethod(expense.paymentMethod),
+    createdAt: expense.createdAt || now,
+    updatedAt: expense.updatedAt || now,
+  };
+}
+
+function normalizeSupplier(supplier: Partial<Supplier>): Supplier {
+  const now = new Date().toISOString();
+  return {
+    id: supplier.id || makeId("supplier"),
+    name: supplier.name || "Fournisseur à renseigner",
+    contact: supplier.contact || "",
+    email: supplier.email || "",
+    phone: supplier.phone || "",
+    siret: supplier.siret || "",
+    vatNumber: supplier.vatNumber || "",
+    address: supplier.address || "",
+    postalCode: supplier.postalCode || "",
+    city: supplier.city || "",
+    notes: supplier.notes || "",
+    createdAt: supplier.createdAt || now,
+    updatedAt: supplier.updatedAt || now,
+  };
 }
 
 function normalizeClient(client: Partial<Client>): Client {
@@ -348,6 +389,7 @@ function normalizeCatalogItem(item: Partial<CatalogItem>): CatalogItem {
     stockMinimum: normalizeNumber(item.stockMinimum, 0),
     stockUnit: item.stockUnit || item.unit || "",
     supplier: item.supplier || "",
+    supplierId: item.supplierId,
     location: item.location || "",
     stockMovements: Array.isArray(item.stockMovements)
       ? item.stockMovements.map((movement) => ({
@@ -370,6 +412,13 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     ...(input?.company ?? {}),
     themeId: isThemeId(input?.company?.themeId) ? input.company.themeId : fallback.company.themeId,
   };
+  const suppliers = Array.isArray(input?.suppliers) ? input.suppliers.map(normalizeSupplier) : fallback.suppliers;
+  const catalog = (Array.isArray(input?.catalog) ? input.catalog.map(normalizeCatalogItem) : fallback.catalog).map((item) => {
+    const linkedSupplier = item.supplierId
+      ? suppliers.find((supplier) => supplier.id === item.supplierId)
+      : suppliers.find((supplier) => supplier.name.trim().localeCompare(item.supplier.trim(), "fr", { sensitivity: "base" }) === 0);
+    return linkedSupplier ? { ...item, supplierId: linkedSupplier.id, supplier: linkedSupplier.name } : item;
+  });
 
   return {
     company,
@@ -381,6 +430,8 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     documents: Array.isArray(input?.documents)
       ? input.documents.map((doc) => normalizeDocument(doc, company.defaultVatRate))
       : fallback.documents,
-    catalog: Array.isArray(input?.catalog) ? input.catalog.map(normalizeCatalogItem) : fallback.catalog,
+    catalog,
+    expenses: Array.isArray(input?.expenses) ? input.expenses.map(normalizeExpense) : fallback.expenses,
+    suppliers,
   };
 }
