@@ -63,6 +63,10 @@ export interface AccountingMonth {
   vatAmount: number;
   totalTtc: number;
   netProfit: number;
+  taxableProfit: number;
+  estimatedCorporateTax: number;
+  netProfitAfterTax: number;
+  taxShareOfRevenue: number;
 }
 
 export interface AccountingReport {
@@ -79,6 +83,10 @@ export interface AccountingReport {
   marginAmount: number;
   averageMarginRate: number;
   netProfit: number;
+  taxableProfit: number;
+  estimatedCorporateTax: number;
+  netProfitAfterTax: number;
+  taxShareOfRevenue: number;
   vatAmount: number;
   deductibleVat: number;
   vatBalance: number;
@@ -89,6 +97,13 @@ const accountingTypes = new Set<AccountingDocumentType>(["invoice", "creditNote"
 
 function round(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function estimateCorporateTax(taxableProfit: number) {
+  const profit = Math.max(0, taxableProfit);
+  const reducedBase = Math.min(profit, 42500);
+  const normalBase = Math.max(0, profit - 42500);
+  return round(reducedBase * 0.15 + normalBase * 0.25);
 }
 
 function clientName(client: Client | undefined) {
@@ -287,6 +302,9 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, values]) => {
       const operatingExpensesHt = expensesByMonth.get(key) || 0;
+      const taxableProfit = round(Math.max(0, values.marginAmount - operatingExpensesHt));
+      const estimatedCorporateTax = estimateCorporateTax(taxableProfit);
+      const netProfit = round(values.marginAmount - operatingExpensesHt);
       return {
         key,
         label: monthLabel(key),
@@ -297,12 +315,19 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
         marginRate: values.revenueHt ? (values.marginAmount / Math.abs(values.revenueHt)) * 100 : 0,
         vatAmount: round(values.vatAmount),
         totalTtc: round(values.totalTtc),
-        netProfit: round(values.marginAmount - operatingExpensesHt),
+        netProfit,
+        taxableProfit,
+        estimatedCorporateTax,
+        netProfitAfterTax: round(netProfit - estimatedCorporateTax),
+        taxShareOfRevenue: round(values.revenueHt ? (estimatedCorporateTax / Math.abs(values.revenueHt)) * 100 : 0),
       };
     });
   const operatingExpensesHt = expenseEntries.reduce((sum, expense) => sum + expense.amountHt, 0);
   const deductibleVat = expenseEntries.reduce((sum, expense) => sum + expense.vatAmount, 0);
   const expenseDocumentCount = new Set(expenseEntries.map((expense) => expense.purchaseInvoiceId || expense.expenseId || expense.id)).size;
+  const netProfit = round(sums.marginAmount - operatingExpensesHt);
+  const taxableProfit = round(Math.max(0, netProfit));
+  const estimatedCorporateTax = estimateCorporateTax(taxableProfit);
 
   return {
     period,
@@ -317,7 +342,11 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
     operatingExpensesHt: round(operatingExpensesHt),
     marginAmount: round(sums.marginAmount),
     averageMarginRate: sums.revenueHt ? (sums.marginAmount / Math.abs(sums.revenueHt)) * 100 : 0,
-    netProfit: round(sums.marginAmount - operatingExpensesHt),
+    netProfit,
+    taxableProfit,
+    estimatedCorporateTax,
+    netProfitAfterTax: round(netProfit - estimatedCorporateTax),
+    taxShareOfRevenue: round(sums.revenueHt ? (estimatedCorporateTax / Math.abs(sums.revenueHt)) * 100 : 0),
     vatAmount: round(sums.vatAmount),
     deductibleVat: round(deductibleVat),
     vatBalance: round(sums.vatAmount - deductibleVat),

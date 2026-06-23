@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const localCallbackUrl = "http://127.0.0.1:43177/auth-callback";
-const desktopRedirectUrl = "atelier://app/index.html";
+const desktopRedirectUrl = "devix://app/index.html";
 
 function htmlResponse(body: string, status = 200) {
   return new Response(body, {

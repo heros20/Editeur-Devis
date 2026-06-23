@@ -1,9 +1,9 @@
 /// <reference types="vite/client" />
 
-import type { AtelierApi } from "./runtimeApi";
+import type { DevixApi } from "./runtimeApi";
 
 declare global {
   interface Window {
-    atelierApi?: AtelierApi;
+    devixApi?: DevixApi;
   }
 }

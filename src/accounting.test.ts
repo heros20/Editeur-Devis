@@ -164,6 +164,60 @@ describe("accounting report", () => {
     expect(report.months[0].netProfit).toBe(70);
   });
 
+  it("estimates corporate tax from taxable profit", () => {
+    const data = createDefaultAppData();
+    data.documents = [document({ lines: [line({ quantity: 1, unitPrice: 60000, purchasePrice: 0, vatRate: 20 })] })];
+    data.expenses = [
+      {
+        id: "expense-1",
+        date: "2026-06-15",
+        supplier: "Fournisseur",
+        reference: "F-42",
+        category: "Honoraires",
+        description: "Charge",
+        amountHt: 10000,
+        vatRate: 20,
+        paymentMethod: "bank_transfer",
+        createdAt: "2026-06-15",
+        updatedAt: "2026-06-15",
+      },
+    ];
+
+    const report = buildAccountingReport(data, annualPeriod(2026));
+
+    expect(report.taxableProfit).toBe(50000);
+    expect(report.estimatedCorporateTax).toBe(8250);
+    expect(report.netProfitAfterTax).toBe(41750);
+    expect(report.taxShareOfRevenue).toBe(13.75);
+    expect(report.months[0].estimatedCorporateTax).toBe(8250);
+  });
+
+  it("does not estimate corporate tax on a loss", () => {
+    const data = createDefaultAppData();
+    data.expenses = [
+      {
+        id: "expense-1",
+        date: "2026-06-15",
+        supplier: "Fournisseur",
+        reference: "F-42",
+        category: "Loyer",
+        description: "Charge",
+        amountHt: 1000,
+        vatRate: 20,
+        paymentMethod: "bank_transfer",
+        createdAt: "2026-06-15",
+        updatedAt: "2026-06-15",
+      },
+    ];
+
+    const report = buildAccountingReport(data, annualPeriod(2026));
+
+    expect(report.netProfit).toBe(-1000);
+    expect(report.taxableProfit).toBe(0);
+    expect(report.estimatedCorporateTax).toBe(0);
+    expect(report.netProfitAfterTax).toBe(-1000);
+  });
+
   it("details posted supplier invoices line by line without double-counting the linked expense", () => {
     const data = createDefaultAppData();
     data.documents = [document()];

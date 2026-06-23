@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("atelierApi", {
+contextBridge.exposeInMainWorld("devixApi", {
   loadStore: () => ipcRenderer.invoke("store:load"),
   saveStore: (data) => ipcRenderer.invoke("store:save", data),
   nextNumber: (type) => ipcRenderer.invoke("store:next-number", type),

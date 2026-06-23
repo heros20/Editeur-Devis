@@ -27,7 +27,7 @@
 
 .purchaseLayout {
   display: grid;
-  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(520px, 640px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -187,6 +187,54 @@
   margin: 12px 0;
 }
 
+.purchaseOrderFilters {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.purchaseStatusFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.purchaseStatusFilters button {
+  min-width: 0;
+  min-height: 36px;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 9px;
+  border: 1px solid var(--theme-border);
+  background: white;
+  color: var(--theme-muted);
+}
+
+.purchaseStatusFilters button.active {
+  border-color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, white);
+  color: var(--theme-primary-dark);
+}
+
+.purchaseStatusFilters span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchaseStatusFilters b {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.purchaseMonthFilter {
+  display: grid;
+  gap: 4px;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .purchaseList {
   display: grid;
   gap: 8px;
@@ -198,6 +246,116 @@
   grid-column: 1 / -1;
   padding: 18px;
   text-align: center;
+}
+
+.purchaseOrderTable {
+  gap: 12px;
+}
+
+.purchaseMonthGroup {
+  display: grid;
+  gap: 7px;
+}
+
+.purchaseMonthHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: var(--theme-surface);
+  color: var(--theme-text);
+}
+
+.purchaseMonthHeader strong {
+  text-transform: capitalize;
+}
+
+.purchaseMonthHeader span {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.purchaseOrderRows {
+  display: grid;
+  gap: 5px;
+}
+
+.purchaseOrderRow {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(88px, 0.8fr) minmax(120px, 1.3fr) minmax(102px, 0.9fr) minmax(88px, 0.8fr) minmax(94px, 0.9fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--theme-text);
+  text-align: left;
+}
+
+.purchaseOrderRow.selected {
+  border-color: var(--theme-primary);
+  box-shadow: inset 3px 0 var(--theme-primary);
+}
+
+.purchaseOrderRow strong,
+.purchaseOrderRow span,
+.purchaseOrderRow b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchaseOrderRow span {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.purchaseOrderRow b {
+  justify-self: end;
+  font-size: 12px;
+}
+
+.purchaseOrderSupplier {
+  color: var(--theme-text) !important;
+}
+
+.purchaseOrderRow em {
+  justify-self: start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.purchaseOrderRow em.posted {
+  background: color-mix(in srgb, #228b57 15%, transparent);
+  color: #187044;
+}
+
+.purchaseOrderRow em.sent {
+  background: color-mix(in srgb, #8a5d11 15%, transparent);
+  color: #7b4b12;
+}
+
+.purchaseOrderRow em.draft {
+  background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  color: var(--theme-primary-dark);
 }
 
 .purchaseCard {
@@ -509,11 +667,25 @@
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
     max-height: 250px;
   }
+
+  .purchaseOrderTable {
+    grid-template-columns: 1fr;
+    max-height: 360px;
+  }
 }
 
 @media (max-width: 920px) {
   .purchaseMetaGrid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .purchaseOrderRow {
+    grid-template-columns: minmax(82px, 0.9fr) minmax(92px, 1fr) minmax(96px, 1fr) minmax(84px, 0.9fr);
+  }
+
+  .purchaseOrderRow span:nth-of-type(1),
+  .purchaseOrderRow span:nth-of-type(3) {
+    display: none;
   }
 }
 
@@ -533,6 +705,29 @@
     padding: 16px;
   }
 
+  .purchaseStatusFilters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .purchaseMonthHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .purchaseMonthHeader span {
+    text-align: left;
+  }
+
+  .purchaseOrderRow {
+    grid-template-columns: minmax(86px, 1fr) minmax(94px, 1fr);
+  }
+
+  .purchaseOrderRow .purchaseOrderSupplier,
+  .purchaseOrderRow span:nth-of-type(2),
+  .purchaseOrderRow b {
+    display: none;
+  }
+
   .purchaseFooter,
   .purchaseTotals {
     align-items: stretch;
@@ -546,6 +741,29 @@
   .purchaseHistoryArrow {
     transform: rotate(90deg);
     justify-self: center;
+  }
+
+  .documentStatusFilters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .documentMonthHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .documentMonthHeader span {
+    text-align: left;
+  }
+
+  .documentRow {
+    grid-template-columns: minmax(92px, 1fr) minmax(96px, 1fr) minmax(92px, 0.8fr);
+  }
+
+  .documentRow > span:nth-of-type(2),
+  .documentRow b,
+  .documentRow em {
+    display: none;
   }
 }
 
@@ -767,6 +985,49 @@ textarea:disabled {
 .danger {
   background: #9b2f25;
 }
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(22, 31, 28, 0.46);
+}
+
+.typedConfirmDialog,
+.choiceConfirmDialog {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 22px 60px rgba(35, 42, 39, 0.22);
+}
+
+.typedConfirmDialog h2,
+.choiceConfirmDialog h2 {
+  margin: 2px 0 6px;
+  font-size: 22px;
+}
+
+.typedConfirmDialog p,
+.choiceConfirmDialog p {
+  margin: 0;
+  color: var(--theme-muted);
+  line-height: 1.45;
+}
+
+.typedConfirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .subtleButton {
   min-height: 32px;
   padding: 0 10px;
@@ -1641,6 +1902,14 @@ textarea:disabled {
   gap: 8px;
 }
 
+.panelSubtitle {
+  display: block;
+  margin-top: 3px;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .statusGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1838,6 +2107,152 @@ label textarea,
   grid-auto-rows: minmax(132px, auto);
   gap: 9px;
   align-content: start;
+}
+
+.documentListFilters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
+  gap: 8px;
+  align-items: end;
+}
+
+.documentStatusFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.documentStatusFilters button {
+  min-width: 0;
+  min-height: 36px;
+  justify-content: space-between;
+  padding: 0 9px;
+  border: 1px solid var(--theme-border);
+  background: white;
+  color: var(--theme-muted);
+}
+
+.documentStatusFilters button.active {
+  border-color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, white);
+  color: var(--theme-primary-dark);
+}
+
+.documentStatusFilters span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentStatusFilters b {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.documentMonthFilter {
+  display: grid;
+  gap: 4px;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.documentTable {
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+  gap: 12px;
+}
+
+.documentMonthGroup {
+  display: grid;
+  gap: 7px;
+}
+
+.documentMonthHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: var(--theme-surface);
+}
+
+.documentMonthHeader strong {
+  text-transform: capitalize;
+}
+
+.documentMonthHeader span {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.documentRows {
+  display: grid;
+  gap: 5px;
+}
+
+.documentRow {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.7fr) minmax(96px, 0.8fr) minmax(88px, 0.8fr) minmax(140px, 1.3fr) minmax(130px, 1.1fr) minmax(92px, 0.8fr) minmax(94px, 0.8fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--theme-text);
+  text-align: left;
+}
+
+.documentRow.selected {
+  border-color: var(--theme-accent);
+  box-shadow: inset 3px 0 var(--theme-accent);
+}
+
+.documentRow strong,
+.documentRow span,
+.documentRow b,
+.documentRow em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentRow span {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.documentRow b {
+  font-size: 13px;
+}
+
+.documentRowClient {
+  color: var(--theme-text) !important;
+}
+
+.documentRow .statusBadge {
+  justify-self: start;
+}
+
+.documentRow em {
+  justify-self: end;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--theme-primary-dark);
 }
 
 .listMeta {
@@ -2824,7 +3239,7 @@ textarea {
 .clientsPanel {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   gap: 10px;
 }
 
@@ -2838,36 +3253,81 @@ textarea {
 .clientsLayout {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+}
+
+.clientListFilters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.clientListFilters button {
+  min-width: 0;
+  min-height: 36px;
+  justify-content: space-between;
+  padding: 0 9px;
+  border: 1px solid var(--theme-border);
+  background: white;
+  color: var(--theme-muted);
+}
+
+.clientListFilters button.active {
+  border-color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, white);
+  color: var(--theme-primary-dark);
+}
+
+.clientListFilters span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientListFilters b {
+  flex: 0 0 auto;
+  font-size: 11px;
 }
 
 .clientList {
   min-height: 0;
   max-height: 100%;
   display: grid;
-  gap: 8px;
+  gap: 5px;
   align-content: start;
   overflow: auto;
 }
 
 .clientListRow {
-  min-height: 74px;
+  min-height: 58px;
   display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  grid-template-areas:
+    "number name"
+    "number contact"
+    "number meta";
   align-content: center;
-  justify-content: stretch;
-  gap: 3px;
-  padding: 10px 12px;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 8px 11px;
   background: white;
   color: var(--theme-text);
   border: 1px solid var(--theme-border);
+  border-radius: 6px;
   text-align: left;
 }
 
 .clientListRow.selected {
   border-color: var(--theme-primary);
   box-shadow: inset 4px 0 0 var(--theme-primary);
+}
+
+.draftClientRow {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--theme-primary) 5%, white);
 }
 
 .clientListRow span,
@@ -2886,6 +3346,24 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.clientListRow span {
+  grid-area: number;
+  align-self: center;
+}
+
+.clientListRow strong {
+  grid-area: name;
+}
+
+.clientListRow em {
+  grid-area: contact;
+}
+
+.clientListRow small {
+  grid-area: meta;
+  color: #51635e;
 }
 
 .clientFolder {
@@ -2916,40 +3394,49 @@ textarea {
   gap: 8px;
 }
 
-.clientFolderKpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+.clientFolderSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 850;
 }
 
-.clientFolderKpis div {
-  min-height: 62px;
-  display: grid;
-  align-content: center;
-  gap: 4px;
-  padding: 9px 11px;
-  border: 1px solid #e4dbd1;
-  border-radius: 6px;
+.clientFolderSummary span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
   background: var(--theme-soft);
 }
 
-.clientFolderKpis span {
-  color: #69766f;
-  font-size: 12px;
-  font-weight: 800;
+.clientFolderTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 360px);
+  padding: 4px;
+  border-radius: 6px;
+  background: #e9e1d8;
 }
 
-.clientFolderKpis strong {
+.clientFolderTabs button {
+  min-height: 32px;
+  padding: 0;
+  background: transparent;
+  color: #5c5048;
+}
+
+.clientFolderTabs button.active {
+  background: white;
   color: var(--theme-text);
-  font-size: 17px;
 }
 
 .clientFolderBody {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
 }
 
 .clientDocumentsPanel {
@@ -3059,6 +3546,14 @@ textarea {
   display: grid;
   gap: 10px;
   align-content: start;
+}
+
+.clientCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .clientEmpty {
@@ -3661,7 +4156,6 @@ textarea {
 
   .statusGrid,
   .paymentSummary,
-  .clientFolderKpis,
   .paymentGrid,
   .reminderGrid {
     grid-template-columns: 1fr;
@@ -3685,6 +4179,42 @@ textarea {
 
   .docList {
     max-height: 360px;
+  }
+
+  .documentTable {
+    max-height: 420px;
+  }
+
+  .documentListFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .documentRow {
+    grid-template-columns: minmax(82px, 0.8fr) minmax(92px, 0.8fr) minmax(130px, 1.2fr) minmax(96px, 0.8fr) minmax(94px, 0.8fr);
+  }
+
+  .documentRow > span:first-child,
+  .documentRowClient {
+    display: none;
+  }
+
+  .clientListFilters {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .clientListFilters button {
+    flex: 0 0 auto;
+    min-width: 132px;
+  }
+
+  .clientListRow {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .clientListRow em {
+    display: none;
   }
 
   .dashboard,

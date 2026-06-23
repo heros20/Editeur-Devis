@@ -1,6 +1,6 @@
 import { createClient, type Session } from "@supabase/supabase-js";
 import { createDefaultAppData, normalizeData } from "./defaultData";
-import { getAtelierApi } from "./runtimeApi";
+import { getDevixApi } from "./runtimeApi";
 import type { AppData, DocumentAttachment, DocumentType } from "./types";
 
 const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
@@ -19,7 +19,7 @@ function assertSupabaseConfigured() {
 }
 
 function createAuthStorage() {
-  const api = getAtelierApi();
+  const api = getDevixApi();
 
   return {
     async getItem(key: string) {
@@ -152,7 +152,7 @@ function authRedirectUrl() {
 }
 
 function isDesktopRuntime() {
-  return Boolean(window.atelierApi) || window.location.protocol === "atelier:";
+  return Boolean(window.devixApi) || window.location.protocol === "devix:";
 }
 
 function cleanAuthUrl() {
@@ -264,7 +264,7 @@ export async function signInWithGoogle() {
   });
   assertRemoteError(error);
   if (isDesktopRuntime() && data.url) {
-    await getAtelierApi().openExternal(data.url);
+    await getDevixApi().openExternal(data.url);
   }
   return data;
 }

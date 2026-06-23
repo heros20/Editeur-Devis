@@ -1,4 +1,4 @@
-export const themeIds = ["atelier", "ocean", "emerald", "midnight", "burgundy", "lavender", "amber", "slate", "rose"] as const;
+export const themeIds = ["devix", "ocean", "emerald", "midnight", "burgundy", "lavender", "amber", "slate", "rose"] as const;
 
 export type ThemeId = (typeof themeIds)[number];
 
@@ -26,8 +26,8 @@ export interface DevixTheme {
 
 export const devixThemes: DevixTheme[] = [
   {
-    id: "atelier",
-    name: "Atelier",
+    id: "devix",
+    name: "Devix",
     description: "Sauge, argile et tons naturels",
     colors: {
       primary: "#466b5f",
@@ -198,7 +198,7 @@ export const devixThemes: DevixTheme[] = [
   },
 ];
 
-export const defaultThemeId: ThemeId = "atelier";
+export const defaultThemeId: ThemeId = "devix";
 
 export function isThemeId(value: unknown): value is ThemeId {
   return themeIds.includes(value as ThemeId);

@@ -2,7 +2,7 @@ import { createDefaultAppData, normalizeData } from "./defaultData";
 import type { AppData, DocumentAttachment, DocumentType } from "./types";
 import { formatBusinessNumber, sanitizeFileName } from "./utils";
 
-export interface AtelierApi {
+export interface DevixApi {
   loadStore: () => Promise<AppData>;
   saveStore: (data: AppData) => Promise<AppData>;
   nextNumber: (type: DocumentType | "client") => Promise<string>;
@@ -27,7 +27,7 @@ export interface AtelierApi {
   deleteAttachment: (attachment: DocumentAttachment) => Promise<{ deleted: boolean }>;
 }
 
-const storageKey = "atelier-du-bois:data:v1";
+const storageKey = "devix:data:v1";
 
 function readBrowserStore() {
   try {
@@ -109,7 +109,7 @@ function mailtoUrl({ to, subject, body }: { to?: string; subject: string; body: 
   return `mailto:${encodeURIComponent(to || "")}?${params}`;
 }
 
-const browserApi: AtelierApi = {
+const browserApi: DevixApi = {
   async loadStore() {
     return readBrowserStore();
   },
@@ -214,6 +214,6 @@ const browserApi: AtelierApi = {
   },
 };
 
-export function getAtelierApi(): AtelierApi {
-  return window.atelierApi ?? browserApi;
+export function getDevixApi(): DevixApi {
+  return window.devixApi ?? browserApi;
 }

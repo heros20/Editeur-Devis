@@ -18,8 +18,6 @@ Le lanceur utilise d'abord la version portable si elle existe, sinon il demarre 
 release\Devix-1.0.2-Portable.exe
 ```
 
-L'ancien lanceur `LANCER-ATELIER-DU-BOIS.bat` reste compatible.
-
 ## Utiliser sur cle USB
 
 Copier ces elements sur la cle:
@@ -71,7 +69,7 @@ Les confirmations de compte, invitations equipe et reinitialisations de mot de p
 Pour une application installee, utiliser:
 
 ```text
-VITE_AUTH_REDIRECT_URL=atelier://app/index.html
+VITE_AUTH_REDIRECT_URL=devix://app/index.html
 ```
 
 Pour un usage multi-machines sans application installee, utiliser plutot une URL HTTPS stable, par exemple une petite page web de redirection:
@@ -82,7 +80,7 @@ VITE_AUTH_REDIRECT_URL=https://votre-domaine.fr/auth/callback
 
 Cette URL doit aussi etre ajoutee dans Supabase, dans Authentication > URL Configuration > Redirect URLs.
 
-Le dossier `auth-callback/` contient une page statique prete a heberger. Elle recupere les parametres du lien Supabase puis ouvre Devix avec le protocole `atelier://`.
+Le dossier `auth-callback/` contient une page statique prete a heberger. Elle recupere les parametres du lien Supabase puis ouvre Devix avec le protocole `devix://`.
 
 Exemple avec Vercel ou Netlify:
 

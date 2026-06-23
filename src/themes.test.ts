@@ -14,8 +14,8 @@ describe("Devix themes", () => {
     }
   });
 
-  it("falls back to Atelier for an unknown theme", () => {
-    expect(getTheme("unknown").id).toBe("atelier");
+  it("falls back to Devix for an unknown theme", () => {
+    expect(getTheme("unknown").id).toBe("devix");
   });
 
   it("uses the selected palette in company PDFs", () => {

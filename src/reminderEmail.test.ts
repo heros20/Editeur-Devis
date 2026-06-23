@@ -60,7 +60,7 @@ const client = (partial: Partial<Client>): Client => ({
 });
 
 const company = (partial: Partial<CompanySettings>): CompanySettings => ({
-  themeId: "atelier",
+  themeId: "devix",
   name: "Devix",
   legalName: "Devix",
   siret: "",

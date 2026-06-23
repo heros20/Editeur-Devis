@@ -166,9 +166,19 @@ export function AccountingView({
           <small>Marge pondérée par le CA</small>
         </article>
         <article>
-          <span>Résultat net</span>
+          <span>Résultat avant IS</span>
           <strong>{currency(report.netProfit)}</strong>
-          <small>Marge − charges saisies</small>
+          <small>Bénéfice imposable {currency(report.taxableProfit)}</small>
+        </article>
+        <article>
+          <span>IS estimé</span>
+          <strong>{currency(report.estimatedCorporateTax)}</strong>
+          <small>{percent(report.taxShareOfRevenue)} du CA HT</small>
+        </article>
+        <article>
+          <span>Résultat après IS</span>
+          <strong>{currency(report.netProfitAfterTax)}</strong>
+          <small>Estimation fiscale automatique</small>
         </article>
         <article>
           <span>TVA facturée</span>
@@ -194,7 +204,9 @@ export function AccountingView({
                   <th>Achats directs</th>
                   <th>Charges</th>
                   <th>Marge</th>
-                  <th>Résultat</th>
+                  <th>Avant IS</th>
+                  <th>IS estimé</th>
+                  <th>Après IS</th>
                   <th>% marge</th>
                 </tr>
               </thead>
@@ -208,12 +220,14 @@ export function AccountingView({
                       <td>{currency(month.operatingExpensesHt)}</td>
                       <td className={month.marginAmount < 0 ? "negative" : "positive"}>{currency(month.marginAmount)}</td>
                       <td className={month.netProfit < 0 ? "negative" : "positive"}>{currency(month.netProfit)}</td>
+                      <td>{currency(month.estimatedCorporateTax)}</td>
+                      <td className={month.netProfitAfterTax < 0 ? "negative" : "positive"}>{currency(month.netProfitAfterTax)}</td>
                       <td>{percent(month.marginRate)}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="accountingEmpty">
+                    <td colSpan={9} className="accountingEmpty">
                       Aucune écriture sur cette période.
                     </td>
                   </tr>

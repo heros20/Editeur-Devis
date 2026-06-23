@@ -46,7 +46,7 @@ import { buildAccountingXlsx, renderAccountingHtml } from "./accountingExport";
 import { createDefaultAppData, normalizeData } from "./defaultData";
 import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { buildPaymentReminderEmail } from "./reminderEmail";
-import { getAtelierApi } from "./runtimeApi";
+import { getDevixApi } from "./runtimeApi";
 import { devixThemes, getTheme, themeCssVariables, type ThemeId } from "./themes";
 import {
   completeOAuthRedirect,
@@ -136,6 +136,18 @@ type AuthMode = "signin" | "signup";
 type ReminderDraft = Pick<PaymentReminder, "sentAt" | "channel" | "note">;
 type ReminderSendResult = { success: boolean; message: string };
 type DocumentSaveState = "saved" | "dirty" | "saving" | "error";
+type DocumentStatusFilter = "all" | DocumentStatus;
+type ClientListFilter = "all" | Client["type"] | "due" | "withDocuments";
+type TypedConfirmationState = {
+  title: string;
+  message: string;
+  expected: string;
+  value: string;
+};
+type ChoiceConfirmationState = {
+  title: string;
+  message: string;
+};
 
 const roleLabels: Record<WorkspaceRole, string> = {
   superadmin: "Superadmin",
@@ -175,6 +187,20 @@ function clientSearchText(client: Client) {
 
 function activityDate(doc: BusinessDocument) {
   return doc.updatedAt || doc.issueDate || doc.createdAt || "";
+}
+
+function documentDisplayDate(doc: BusinessDocument) {
+  return doc.issueDate || activityDate(doc);
+}
+
+function dateMonthKey(date: string) {
+  return /^\d{4}-\d{2}/.test(date) ? date.slice(0, 7) : "unknown";
+}
+
+function dateMonthLabel(key: string) {
+  if (key === "unknown") return "Date inconnue";
+  const [year, month] = key.split("-").map(Number);
+  return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
 }
 
 function formatShortDate(date: string) {
@@ -270,7 +296,7 @@ const emptyCatalogItem = (vatRate = 20): CatalogItem => ({
 });
 
 export function App() {
-  const [api] = useState(() => getAtelierApi());
+  const [api] = useState(() => getDevixApi());
   const [data, setData] = useState<AppData>(() => createDefaultAppData());
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -279,8 +305,12 @@ export function App() {
   const [documentBackView, setDocumentBackView] = useState<"documents" | "clients" | "archives">("documents");
   const [query, setQuery] = useState("");
   const [clientQuery, setClientQuery] = useState("");
+  const [clientListFilter, setClientListFilter] = useState<ClientListFilter>("all");
+  const [draftClient, setDraftClient] = useState<Client | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [typeFilter, setTypeFilter] = useState<DocumentType | "all">("all");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState<DocumentStatusFilter>("all");
+  const [documentMonthFilter, setDocumentMonthFilter] = useState("all");
   const [notice, setNotice] = useState("");
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
@@ -303,6 +333,10 @@ export function App() {
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
   const [documentSaveState, setDocumentSaveState] = useState<DocumentSaveState>("saved");
+  const [typedConfirmation, setTypedConfirmation] = useState<TypedConfirmationState | null>(null);
+  const typedConfirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  const [choiceConfirmation, setChoiceConfirmation] = useState<ChoiceConfirmationState | null>(null);
+  const choiceConfirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
 
   useEffect(() => {
     if (documentSaveState !== "dirty" && documentSaveState !== "error") return;
@@ -327,6 +361,35 @@ export function App() {
     if (message.includes("failed to fetch") || message.includes("network")) return "Connexion internet indisponible.";
     if (raw && !message.includes("supabase")) return raw;
     return fallback;
+  }
+
+  function requestTypedConfirmation(title: string, message: string, expected: string) {
+    typedConfirmationResolver.current?.(false);
+    return new Promise<boolean>((resolve) => {
+      typedConfirmationResolver.current = resolve;
+      setTypedConfirmation({ title, message, expected, value: "" });
+    });
+  }
+
+  function closeTypedConfirmation(confirmed: boolean) {
+    const accepted = Boolean(confirmed && typedConfirmation?.value === typedConfirmation?.expected);
+    typedConfirmationResolver.current?.(accepted);
+    typedConfirmationResolver.current = null;
+    setTypedConfirmation(null);
+  }
+
+  function requestChoiceConfirmation(title: string, message: string) {
+    choiceConfirmationResolver.current?.(false);
+    return new Promise<boolean>((resolve) => {
+      choiceConfirmationResolver.current = resolve;
+      setChoiceConfirmation({ title, message });
+    });
+  }
+
+  function closeChoiceConfirmation(confirmed: boolean) {
+    choiceConfirmationResolver.current?.(confirmed);
+    choiceConfirmationResolver.current = null;
+    setChoiceConfirmation(null);
   }
 
   useEffect(() => {
@@ -574,11 +637,45 @@ export function App() {
     () => [...activeDocuments].sort((a, b) => activityDate(b).localeCompare(activityDate(a)) || b.number.localeCompare(a.number)),
     [activeDocuments]
   );
+  const clientStatsById = useMemo(() => {
+    const stats = new Map<string, { documents: number; totalTtc: number; due: number; lastActivity: string }>();
+    for (const client of data.clients) {
+      stats.set(client.id, { documents: 0, totalTtc: 0, due: 0, lastActivity: "" });
+    }
+    for (const doc of activeDocuments) {
+      const current = stats.get(doc.clientId) || { documents: 0, totalTtc: 0, due: 0, lastActivity: "" };
+      const value = totals(doc.lines).totalTtc;
+      stats.set(doc.clientId, {
+        documents: current.documents + 1,
+        totalTtc: current.totalTtc + value,
+        due: current.due + (doc.type === "invoice" ? paymentSummary(doc, value).remainingAmount : 0),
+        lastActivity: activityDate(doc) > current.lastActivity ? activityDate(doc) : current.lastActivity,
+      });
+    }
+    return stats;
+  }, [activeDocuments, data.clients]);
   const filteredClients = useMemo(() => {
     const terms = normalizeSearch(clientQuery).split(/\s+/).filter(Boolean);
-    if (!terms.length) return sortedClients;
-    return sortedClients.filter((client) => terms.every((term) => clientSearchText(client).includes(term)));
-  }, [clientQuery, sortedClients]);
+    return sortedClients
+      .filter((client) => {
+        const stats = clientStatsById.get(client.id);
+        if (clientListFilter === "professionnel" || clientListFilter === "particulier") return client.type === clientListFilter;
+        if (clientListFilter === "due") return Boolean(stats && stats.due > 0);
+        if (clientListFilter === "withDocuments") return Boolean(stats && stats.documents > 0);
+        return true;
+      })
+      .filter((client) => !terms.length || terms.every((term) => clientSearchText(client).includes(term)));
+  }, [clientListFilter, clientQuery, clientStatsById, sortedClients]);
+  const clientFilterCounts = useMemo(
+    () => ({
+      all: sortedClients.length,
+      professionnel: sortedClients.filter((client) => client.type === "professionnel").length,
+      particulier: sortedClients.filter((client) => client.type === "particulier").length,
+      due: sortedClients.filter((client) => (clientStatsById.get(client.id)?.due || 0) > 0).length,
+      withDocuments: sortedClients.filter((client) => (clientStatsById.get(client.id)?.documents || 0) > 0).length,
+    }),
+    [clientStatsById, sortedClients]
+  );
   const sortedCatalog = useMemo(
     () => [...data.catalog].sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "fr")),
     [data.catalog]
@@ -586,12 +683,12 @@ export function App() {
   const selectedDoc = useMemo(() => data.documents.find((doc) => doc.id === selectedId), [data.documents, selectedId]);
   const selectedClient = useMemo(() => data.clients.find((client) => client.id === selectedDoc?.clientId), [data.clients, selectedDoc]);
   const selectedClientForEdit = useMemo(
-    () => data.clients.find((client) => client.id === selectedClientId),
-    [data.clients, selectedClientId]
+    () => (draftClient?.id === selectedClientId ? draftClient : data.clients.find((client) => client.id === selectedClientId)),
+    [data.clients, draftClient, selectedClientId]
   );
   const selectedClientDocuments = useMemo(
-    () => sortedDocuments.filter((doc) => doc.clientId === selectedClientId),
-    [selectedClientId, sortedDocuments]
+    () => (draftClient?.id === selectedClientId ? [] : sortedDocuments.filter((doc) => doc.clientId === selectedClientId)),
+    [draftClient, selectedClientId, sortedDocuments]
   );
   const canSuperadmin = workspace?.role === "superadmin";
   const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin" || canSuperadmin;
@@ -656,6 +753,7 @@ export function App() {
 
   useEffect(() => {
     if (view !== "clients") return;
+    if (draftClient?.id === selectedClientId) return;
     if (!filteredClients.length) {
       if (selectedClientId) setSelectedClientId("");
       return;
@@ -663,7 +761,7 @@ export function App() {
     if (!filteredClients.some((client) => client.id === selectedClientId)) {
       setSelectedClientId(filteredClients[0].id);
     }
-  }, [filteredClients, selectedClientId, view]);
+  }, [draftClient, filteredClients, selectedClientId, view]);
 
   useEffect(() => {
     if (view === "catalog" && !canManageCatalog) setView("documents");
@@ -740,8 +838,12 @@ export function App() {
     ) {
       return;
     }
-    const typed = window.prompt(`Dernière vérification : tapez exactement « ${expected} » pour confirmer.`);
-    if (typed !== expected) {
+    const confirmed = await requestTypedConfirmation(
+      "Confirmer la suppression",
+      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
+      expected
+    );
+    if (!confirmed) {
       const message = "Suppression annulée : confirmation incorrecte.";
       setSuperadminError(message);
       showPermissionNotice(message);
@@ -758,6 +860,7 @@ export function App() {
         setWorkspace(remote.context);
         setData(normalizeData(remote.data));
         setSelectedSuperadminOrganizationId("");
+        setDraftClient(null);
         setView("dashboard");
       } else {
         await refreshSuperadminWorkspaces();
@@ -792,6 +895,7 @@ export function App() {
         setData(normalizeData(remote.data));
         setLoadError("");
         setAuthPassword("");
+        setDraftClient(null);
         setView("dashboard");
       }
     } catch (error) {
@@ -868,6 +972,7 @@ export function App() {
       setTeamMembers([]);
       setTeamInvitations([]);
       setInviteEmail("");
+      setDraftClient(null);
       setView("dashboard");
       setNotice("Compte supprimé");
     } catch (error) {
@@ -889,6 +994,7 @@ export function App() {
       setTeamMembers([]);
       setTeamInvitations([]);
       setInviteEmail("");
+      setDraftClient(null);
       setView("dashboard");
     } catch (error) {
       console.error("Déconnexion impossible", error);
@@ -965,10 +1071,6 @@ export function App() {
     }
   }
 
-  if (!loaded) {
-    return <main className="loading">Chargement de Devix...</main>;
-  }
-
   function openDocument(id: string, from: "documents" | "clients" | "archives" = "documents") {
     setSelectedId(id);
     setDocumentBackView(from);
@@ -991,14 +1093,49 @@ export function App() {
     return "Paramètres";
   }
 
-  const filteredDocuments = sortedDocuments
-    .filter((doc) => typeFilter === "all" || doc.type === typeFilter)
-    .filter((doc) => {
-      const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      if (!terms.length) return true;
-      const client = data.clients.find((item) => item.id === doc.clientId);
-      return terms.every((term) => searchableText(doc, client).includes(term));
+  const documentMonthOptions = useMemo(() => {
+    const keys = Array.from(new Set(activeDocuments.map((doc) => dateMonthKey(documentDisplayDate(doc))))).sort((a, b) =>
+      b.localeCompare(a)
+    );
+    return keys.map((key) => ({ key, label: dateMonthLabel(key) }));
+  }, [activeDocuments]);
+  const filteredDocuments = useMemo(() => {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return [...activeDocuments]
+      .sort((a, b) => documentDisplayDate(b).localeCompare(documentDisplayDate(a)) || b.number.localeCompare(a.number))
+      .filter((doc) => typeFilter === "all" || doc.type === typeFilter)
+      .filter((doc) => documentStatusFilter === "all" || doc.status === documentStatusFilter)
+      .filter((doc) => documentMonthFilter === "all" || dateMonthKey(documentDisplayDate(doc)) === documentMonthFilter)
+      .filter((doc) => {
+        if (!terms.length) return true;
+        const client = data.clients.find((item) => item.id === doc.clientId);
+        return terms.every((term) => searchableText(doc, client).includes(term));
+      });
+  }, [activeDocuments, data.clients, documentMonthFilter, documentStatusFilter, query, typeFilter]);
+  const groupedDocuments = useMemo(() => {
+    const groups = new Map<string, BusinessDocument[]>();
+    for (const doc of filteredDocuments) {
+      const key = dateMonthKey(documentDisplayDate(doc));
+      groups.set(key, [...(groups.get(key) || []), doc]);
+    }
+    return Array.from(groups.entries()).map(([key, docs]) => {
+      const total = docs.reduce((sum, doc) => sum + totals(doc.lines).totalTtc, 0);
+      return { key, label: dateMonthLabel(key), docs, total };
     });
+  }, [filteredDocuments]);
+  const documentStatusCounts = useMemo(
+    () => ({
+      all: activeDocuments.length,
+      draft: activeDocuments.filter((doc) => doc.status === "draft").length,
+      partial: activeDocuments.filter((doc) => doc.status === "partial").length,
+      paid: activeDocuments.filter((doc) => doc.status === "paid").length,
+    }),
+    [activeDocuments]
+  );
+
+  if (!loaded) {
+    return <main className="loading">Chargement de Devix...</main>;
+  }
 
   const dashboardTotals = activeDocuments.reduce(
     (acc, doc) => {
@@ -1032,9 +1169,8 @@ export function App() {
       showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
-    const reserved = await reserveNumber("client", data);
-    const client = buildClient(reserved.number, "Nouveau client");
-    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Client créé");
+    const client = buildClient(formatBusinessNumber("client", data.counters.client || 1), "Nouveau client");
+    setDraftClient(client);
     setSelectedClientId(client.id);
     setView("clients");
   }
@@ -1255,7 +1391,10 @@ export function App() {
     const lastHistory = doc.history[doc.history.length - 1];
     const shouldRestoreOrigin = Boolean(
       lastHistory &&
-      window.confirm(`Voulez-vous régénérer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`)
+        (await requestChoiceConfirmation(
+          "Régénérer l'origine",
+          `Voulez-vous régénérer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`
+        ))
     );
     const restored = shouldRestoreOrigin && lastHistory ? restoreDocumentFromHistory(doc, lastHistory) : null;
 
@@ -1434,12 +1573,28 @@ export function App() {
   async function updateClient(client: Client) {
     if (!canEditOperations) {
       showPermissionNotice("Votre accès est en lecture seule.");
-      return;
+      return false;
     }
-    await persist({ ...data, clients: data.clients.map((item) => (item.id === client.id ? client : item)) });
+    const exists = data.clients.some((item) => item.id === client.id);
+    const nextData = exists
+      ? { ...data, clients: data.clients.map((item) => (item.id === client.id ? client : item)) }
+      : {
+          ...data,
+          counters: { ...data.counters, client: Math.max(data.counters.client || 1, (data.counters.client || 1) + 1) },
+          clients: [client, ...data.clients],
+        };
+    const saved = await persist(nextData, exists ? "Client enregistré" : "Client créé");
+    if (saved && draftClient?.id === client.id) setDraftClient(null);
+    return saved;
   }
 
   async function deleteClient(client: Client) {
+    if (draftClient?.id === client.id) {
+      if (!confirmDestructiveAction("Abandonner ce nouveau client non enregistré ?")) return;
+      setDraftClient(null);
+      setSelectedClientId(data.clients[0]?.id || "");
+      return;
+    }
     if (!canDeleteClients) {
       showPermissionNotice("Suppression des clients réservée aux administrateurs.");
       return;
@@ -1596,8 +1751,12 @@ export function App() {
     }
 
     const expected = `ARCHIVER ${year}`;
-    const typed = window.prompt(`Dernière vérification : tapez exactement « ${expected} » pour confirmer.`);
-    if (typed !== expected) {
+    const confirmed = await requestTypedConfirmation(
+      "Confirmer l'archivage",
+      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
+      expected
+    );
+    if (!confirmed) {
       showPermissionNotice("Archivage annulé : confirmation incorrecte.");
       return false;
     }
@@ -2290,14 +2449,24 @@ export function App() {
             </div>
             <div className="panel wide">
               <div className="panelTitle">
-                <h2>Activité récente</h2>
-                {canEditOperations && (
-                  <button onClick={() => createDocument("quote")}>
-                    <Plus size={17} /> Créer un devis
-                  </button>
-                )}
+                <div>
+                  <h2>Activité récente</h2>
+                  {recentDocuments.length > 5 && <span className="panelSubtitle">5 derniers documents affichés</span>}
+                </div>
+                <div className="panelActions">
+                  {recentDocuments.length > 5 && (
+                    <button className="ghost" onClick={() => setView("documents")}>
+                      Voir tous
+                    </button>
+                  )}
+                  {canEditOperations && (
+                    <button onClick={() => createDocument("quote")}>
+                      <Plus size={17} /> Créer un devis
+                    </button>
+                  )}
+                </div>
               </div>
-              <DocumentRows docs={recentDocuments.slice(0, 8)} clients={data.clients} onOpen={openDocument} />
+              <DocumentRows docs={recentDocuments.slice(0, 5)} clients={data.clients} onOpen={openDocument} />
             </div>
           </section>
         )}
@@ -2396,30 +2565,74 @@ export function App() {
                   </button>
                 ))}
               </div>
-              <div className="listMeta">{filteredDocuments.length} document(s)</div>
-              <div className="docList">
-                {filteredDocuments.length ? (
-                  filteredDocuments.map((doc) => {
-                    const sum = totals(doc.lines).totalTtc;
-                    const client = data.clients.find((item) => item.id === doc.clientId);
-                    return (
-                      <button
-                        key={doc.id}
-                        className={selectedId === doc.id ? "docCard selected" : "docCard"}
-                        onClick={() => openDocument(doc.id)}
-                      >
+              <div className="documentListFilters">
+                <div className="documentStatusFilters" aria-label="Filtrer les documents par statut">
+                  {[
+                    ["all", "Tous", documentStatusCounts.all],
+                    ["draft", statusLabels.draft, documentStatusCounts.draft],
+                    ["partial", statusLabels.partial, documentStatusCounts.partial],
+                    ["paid", statusLabels.paid, documentStatusCounts.paid],
+                  ].map(([value, label, count]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={documentStatusFilter === value ? "active" : ""}
+                      onClick={() => setDocumentStatusFilter(value as DocumentStatusFilter)}
+                    >
+                      <span>{label}</span>
+                      <b>{count}</b>
+                    </button>
+                  ))}
+                </div>
+                <label className="documentMonthFilter">
+                  Mois
+                  <select value={documentMonthFilter} onChange={(event) => setDocumentMonthFilter(event.target.value)}>
+                    <option value="all">Tous les mois</option>
+                    {documentMonthOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="listMeta">
+                {filteredDocuments.length} document(s)
+                {filteredDocuments.length !== activeDocuments.length ? ` sur ${activeDocuments.length}` : ""}
+              </div>
+              <div className="docList documentTable">
+                {groupedDocuments.length ? (
+                  groupedDocuments.map((group) => (
+                    <section className="documentMonthGroup" key={group.key}>
+                      <div className="documentMonthHeader">
+                        <strong>{group.label}</strong>
                         <span>
-                          {labels[doc.type]} <strong>{doc.number}</strong>
+                          {group.docs.length} document(s) · {currency(group.total)} TTC
                         </span>
-                        <b>{doc.projectName || "Sans nom"}</b>
-                        <small>{clientLabel(client)}</small>
-                        <div className="docCardFooter">
-                          <StatusBadge status={doc.status} />
-                          <em>{currency(sum)}</em>
-                        </div>
-                      </button>
-                    );
-                  })
+                      </div>
+                      <div className="documentRows">
+                        {group.docs.map((doc) => {
+                          const sum = totals(doc.lines).totalTtc;
+                          const client = data.clients.find((item) => item.id === doc.clientId);
+                          return (
+                            <button
+                              key={doc.id}
+                              className={selectedId === doc.id ? "documentRow selected" : "documentRow"}
+                              onClick={() => openDocument(doc.id)}
+                            >
+                              <span>{labels[doc.type]}</span>
+                              <strong>{doc.number}</strong>
+                              <span>{formatShortDate(documentDisplayDate(doc))}</span>
+                              <b>{doc.projectName || "Sans nom"}</b>
+                              <span className="documentRowClient">{clientLabel(client)}</span>
+                              <StatusBadge status={doc.status} />
+                              <em>{currency(sum)}</em>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))
                 ) : (
                   <div className="emptyRows">Aucun document ne correspond.</div>
                 )}
@@ -2530,15 +2743,45 @@ export function App() {
                 </button>
               )}
             </div>
-            <div className="listMeta">{filteredClients.length} client(s)</div>
+            <div className="clientListFilters" aria-label="Filtrer les clients">
+              {[
+                ["all", "Tous", clientFilterCounts.all],
+                ["professionnel", "Pros", clientFilterCounts.professionnel],
+                ["particulier", "Particuliers", clientFilterCounts.particulier],
+                ["due", "À encaisser", clientFilterCounts.due],
+                ["withDocuments", "Avec documents", clientFilterCounts.withDocuments],
+              ].map(([value, label, count]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={clientListFilter === value ? "active" : ""}
+                  onClick={() => setClientListFilter(value as ClientListFilter)}
+                >
+                  <span>{label}</span>
+                  <b>{count}</b>
+                </button>
+              ))}
+            </div>
+            <div className="listMeta">
+              {filteredClients.length} client(s)
+              {filteredClients.length !== data.clients.length ? ` sur ${data.clients.length}` : ""}
+            </div>
             <div className="clientsLayout">
               <div className="clientList">
+                {draftClient && (
+                  <button
+                    key={draftClient.id}
+                    className={selectedClientId === draftClient.id ? "clientListRow selected draftClientRow" : "clientListRow draftClientRow"}
+                    onClick={() => setSelectedClientId(draftClient.id)}
+                  >
+                    <span>{draftClient.number}</span>
+                    <strong>{draftClient.name || "Nouveau client"}</strong>
+                    <em>{draftClient.email || draftClient.phone || "Fiche en cours de saisie"}</em>
+                    <small>Non enregistré</small>
+                  </button>
+                )}
                 {filteredClients.map((client) => {
-                  const docs = activeDocuments.filter((doc) => doc.clientId === client.id);
-                  const pending = docs.reduce((sum, doc) => {
-                    const value = totals(doc.lines).totalTtc;
-                    return sum + (doc.type === "invoice" ? paymentSummary(doc, value).remainingAmount : 0);
-                  }, 0);
+                  const stats = clientStatsById.get(client.id) || { documents: 0, totalTtc: 0, due: 0, lastActivity: "" };
                   return (
                     <button
                       key={client.id}
@@ -2549,8 +2792,8 @@ export function App() {
                       <strong>{client.name || "Client sans nom"}</strong>
                       <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
                       <small>
-                        {docs.length} document(s)
-                        {pending > 0 ? ` · ${currency(pending)} dû` : ""}
+                        {stats.documents} doc.
+                        {stats.due > 0 ? ` · ${currency(stats.due)} dû` : ""}
                       </small>
                     </button>
                   );
@@ -2562,8 +2805,8 @@ export function App() {
                   client={selectedClientForEdit}
                   documents={selectedClientDocuments}
                   readOnly={!canEditOperations}
-                  canDelete={canDeleteClients}
-                  canCreateDocument={canEditOperations}
+                  canDelete={canDeleteClients || draftClient?.id === selectedClientForEdit.id}
+                  canCreateDocument={canEditOperations && draftClient?.id !== selectedClientForEdit.id}
                   onChange={updateClient}
                   onDelete={deleteClient}
                   onOpenDocument={(id) => openDocument(id, "clients")}
@@ -2691,6 +2934,66 @@ export function App() {
           </section>
         )}
       </main>
+      {typedConfirmation && (
+        <div className="modalBackdrop" role="presentation" onMouseDown={() => closeTypedConfirmation(false)}>
+          <form
+            className="typedConfirmDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="typedConfirmTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeTypedConfirmation(true);
+            }}
+          >
+            <div>
+              <span className="eyebrow">Action définitive</span>
+              <h2 id="typedConfirmTitle">{typedConfirmation.title}</h2>
+              <p>{typedConfirmation.message}</p>
+            </div>
+            <input
+              autoFocus
+              value={typedConfirmation.value}
+              onChange={(event) => setTypedConfirmation((current) => (current ? { ...current, value: event.target.value } : current))}
+              aria-label="Texte de confirmation"
+            />
+            <div className="typedConfirmActions">
+              <button className="ghost" type="button" onClick={() => closeTypedConfirmation(false)}>
+                Annuler
+              </button>
+              <button className="danger" type="submit" disabled={typedConfirmation.value !== typedConfirmation.expected}>
+                <Trash2 size={17} /> Confirmer
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {choiceConfirmation && (
+        <div className="modalBackdrop" role="presentation" onMouseDown={() => closeChoiceConfirmation(false)}>
+          <div
+            className="choiceConfirmDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="choiceConfirmTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div>
+              <span className="eyebrow">Confirmation</span>
+              <h2 id="choiceConfirmTitle">{choiceConfirmation.title}</h2>
+              <p>{choiceConfirmation.message}</p>
+            </div>
+            <div className="typedConfirmActions">
+              <button className="ghost" type="button" onClick={() => closeChoiceConfirmation(false)}>
+                Non
+              </button>
+              <button type="button" onClick={() => closeChoiceConfirmation(true)}>
+                Oui
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4662,7 +4965,7 @@ function CatalogManager({
                     <label>
                       Emplacement
                       <input
-                        placeholder="Atelier, dépôt..."
+                        placeholder="Stock, dépôt..."
                         value={item.location}
                         onChange={(event) => patch(item, { location: event.target.value })}
                       />
@@ -4749,11 +5052,12 @@ function ClientFolder({
   readOnly: boolean;
   canDelete: boolean;
   canCreateDocument: boolean;
-  onChange: (client: Client) => void;
+  onChange: (client: Client) => Promise<boolean>;
   onDelete: (client: Client) => void;
   onOpenDocument: (id: string) => void;
   onCreateDocument: (type: DocumentType) => void;
 }) {
+  const [section, setSection] = useState<"profile" | "documents">("profile");
   const invoiceDue = documents.reduce((sum, doc) => {
     if (doc.type !== "invoice") return sum;
     return sum + paymentSummary(doc).remainingAmount;
@@ -4782,42 +5086,38 @@ function ClientFolder({
         )}
       </div>
 
-      <div className="clientFolderKpis">
-        <div>
-          <span>Documents</span>
-          <strong>{documents.length}</strong>
-        </div>
-        <div>
-          <span>Volume TTC</span>
-          <strong>{currency(totalBusiness)}</strong>
-        </div>
-        <div>
-          <span>À encaisser</span>
-          <strong>{currency(invoiceDue)}</strong>
-        </div>
-        <div>
-          <span>Dernière activité</span>
-          <strong>{lastActivity}</strong>
-        </div>
+      <div className="clientFolderSummary">
+        <span>{documents.length} document(s)</span>
+        <span>{currency(totalBusiness)} TTC</span>
+        <span>{invoiceDue > 0 ? `${currency(invoiceDue)} à encaisser` : "Rien à encaisser"}</span>
+        <span>Dernière activité : {lastActivity}</span>
+      </div>
+
+      <div className="clientFolderTabs" role="tablist" aria-label="Sections du dossier client">
+        <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>
+          Fiche
+        </button>
+        <button type="button" className={section === "documents" ? "active" : ""} onClick={() => setSection("documents")}>
+          Documents
+        </button>
       </div>
 
       <div className="clientFolderBody">
-        <ClientCard client={client} readOnly={readOnly} canDelete={canDelete} onChange={onChange} onDelete={onDelete} />
-        <section className="clientDocumentsPanel">
-          <div className="panelTitle">
-            <h3>Documents du client</h3>
-          </div>
-          {documents.length ? (
-            <div className="clientDocumentGroups">
-              {clientDocumentTypes.map((type) => {
-                const group = documents.filter((doc) => doc.type === type);
-                return (
-                  <div className="clientDocumentGroup" key={type}>
-                    <div className="clientDocumentGroupTitle">
-                      <strong>{labels[type]}</strong>
-                      <span>{group.length}</span>
-                    </div>
-                    {group.length ? (
+        {section === "profile" ? (
+          <ClientCard client={client} readOnly={readOnly} canDelete={canDelete} onChange={onChange} onDelete={onDelete} />
+        ) : (
+          <section className="clientDocumentsPanel">
+            {documents.length ? (
+              <div className="clientDocumentGroups">
+                {clientDocumentTypes.map((type) => {
+                  const group = documents.filter((doc) => doc.type === type);
+                  if (!group.length) return null;
+                  return (
+                    <div className="clientDocumentGroup" key={type}>
+                      <div className="clientDocumentGroupTitle">
+                        <strong>{labels[type]}</strong>
+                        <span>{group.length}</span>
+                      </div>
                       <div className="clientDocumentRows">
                         {group.map((doc) => {
                           const sum = totals(doc.lines).totalTtc;
@@ -4836,21 +5136,19 @@ function ClientFolder({
                           );
                         })}
                       </div>
-                    ) : (
-                      <div className="emptyRows compactEmpty">Aucun document.</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="emptyState clientDocumentsEmpty">
-              <FileText size={38} />
-              <h2>Aucun document client</h2>
-              <p>Créez un devis, un bon de commande ou une facture depuis ce dossier.</p>
-            </div>
-          )}
-        </section>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="emptyState clientDocumentsEmpty">
+                <FileText size={38} />
+                <h2>Aucun document client</h2>
+                <p>Créez un devis, un bon de commande ou une facture depuis ce dossier.</p>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </section>
   );
@@ -4866,23 +5164,54 @@ function ClientCard({
   client: Client;
   readOnly: boolean;
   canDelete: boolean;
-  onChange: (client: Client) => void;
+  onChange: (client: Client) => Promise<boolean>;
   onDelete: (client: Client) => void;
 }) {
-  const patch = (partial: Partial<Client>) => onChange({ ...client, ...partial });
+  const [draft, setDraft] = useState(client);
+  const [saving, setSaving] = useState(false);
+  const draftSignature = [
+    client.id,
+    client.number,
+    client.type,
+    client.name,
+    client.contact,
+    client.email,
+    client.phone,
+    client.address,
+    client.postalCode,
+    client.city,
+    client.notes,
+  ].join("\u0000");
+  useEffect(() => setDraft(client), [draftSignature]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(client);
+  const patch = (partial: Partial<Client>) => setDraft((current) => ({ ...current, ...partial }));
+  async function saveClient() {
+    if (readOnly || saving) return;
+    setSaving(true);
+    const saved = await onChange({ ...draft, name: draft.name.trim() || "Client à renseigner" });
+    setSaving(false);
+    if (saved) setDraft({ ...draft, name: draft.name.trim() || "Client à renseigner" });
+  }
   return (
     <article className="clientCard">
       <div className="cardHeader">
-        <strong>{client.number}</strong>
-        {canDelete && (
-          <button className="iconButton" onClick={() => onDelete(client)}>
-            <Trash2 size={16} />
-          </button>
-        )}
+        <strong>{draft.number}</strong>
+        <div className="clientCardActions">
+          {!readOnly && (
+            <button className="ghost subtleButton" type="button" disabled={saving || !dirty} onClick={() => void saveClient()}>
+              <Save size={16} /> {saving ? "Enregistrement..." : "Enregistrer"}
+            </button>
+          )}
+          {canDelete && (
+            <button className="iconButton" type="button" onClick={() => onDelete(draft)}>
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
       </div>
       <label>
         Type
-        <select disabled={readOnly} value={client.type} onChange={(event) => patch({ type: event.target.value as Client["type"] })}>
+        <select disabled={readOnly} value={draft.type} onChange={(event) => patch({ type: event.target.value as Client["type"] })}>
           <option value="particulier">Particulier</option>
           <option value="professionnel">Professionnel</option>
         </select>
@@ -4892,7 +5221,7 @@ function ClientCard({
         <input
           disabled={readOnly}
           placeholder="Nom du client ou société"
-          value={client.name}
+          value={draft.name}
           onChange={(event) => patch({ name: event.target.value })}
         />
       </label>
@@ -4901,7 +5230,7 @@ function ClientCard({
         <input
           disabled={readOnly}
           placeholder="client@email.fr"
-          value={client.email}
+          value={draft.email}
           onChange={(event) => patch({ email: event.target.value })}
         />
       </label>
@@ -4911,7 +5240,7 @@ function ClientCard({
           disabled={readOnly}
           inputMode="tel"
           placeholder="06 00 00 00 00"
-          value={client.phone}
+          value={draft.phone}
           onChange={(event) => patch({ phone: formatPhoneNumber(event.target.value) })}
         />
       </label>
@@ -4920,7 +5249,7 @@ function ClientCard({
         <input
           disabled={readOnly}
           placeholder="Adresse du client"
-          value={client.address}
+          value={draft.address}
           onChange={(event) => patch({ address: event.target.value })}
         />
       </label>
@@ -4930,13 +5259,13 @@ function ClientCard({
           <input
             disabled={readOnly}
             placeholder="75000"
-            value={client.postalCode}
+            value={draft.postalCode}
             onChange={(event) => patch({ postalCode: event.target.value })}
           />
         </label>
         <label>
           Ville
-          <input disabled={readOnly} placeholder="Paris" value={client.city} onChange={(event) => patch({ city: event.target.value })} />
+          <input disabled={readOnly} placeholder="Paris" value={draft.city} onChange={(event) => patch({ city: event.target.value })} />
         </label>
       </div>
       <label>
@@ -4944,7 +5273,7 @@ function ClientCard({
         <textarea
           disabled={readOnly}
           placeholder="Informations internes"
-          value={client.notes}
+          value={draft.notes}
           onChange={(event) => patch({ notes: event.target.value })}
         />
       </label>

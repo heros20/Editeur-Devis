@@ -6,8 +6,8 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
-const isDev = !app.isPackaged && process.env.ATELIER_LOAD_DIST !== "1";
-const appProtocol = "atelier";
+const isDev = !app.isPackaged && process.env.DEVIX_LOAD_DIST !== "1";
+const appProtocol = "devix";
 const localAuthCallbackPort = 43177;
 let mainWindow;
 let authCallbackServer;
@@ -73,7 +73,7 @@ const defaultData = {
 };
 
 function getDataPath() {
-  return path.join(app.getPath("userData"), "atelier-du-bois-data.json");
+  return path.join(app.getPath("userData"), "devix-data.json");
 }
 
 function getAuthStoragePath() {
@@ -174,13 +174,13 @@ async function writeBackupSet(root, data, makeSnapshot) {
   const latestDir = path.join(root, "latest");
   const attachmentsDir = path.join(app.getPath("userData"), "attachments");
   await fs.mkdir(latestDir, { recursive: true });
-  await fs.writeFile(path.join(latestDir, "atelier-du-bois-data.json"), JSON.stringify(data, null, 2), "utf8");
+  await fs.writeFile(path.join(latestDir, "devix-data.json"), JSON.stringify(data, null, 2), "utf8");
   await copyDirectoryContents(attachmentsDir, path.join(latestDir, "attachments"));
 
   if (makeSnapshot) {
     const snapshotDir = path.join(root, "snapshots", backupTimestamp());
     await fs.mkdir(snapshotDir, { recursive: true });
-    await fs.writeFile(path.join(snapshotDir, "atelier-du-bois-data.json"), JSON.stringify(data, null, 2), "utf8");
+    await fs.writeFile(path.join(snapshotDir, "devix-data.json"), JSON.stringify(data, null, 2), "utf8");
     await copyDirectoryContents(attachmentsDir, path.join(snapshotDir, "attachments"));
     await cleanupSnapshots(root);
   }
@@ -431,7 +431,7 @@ function createWindow() {
         responseHeaders: {
           ...details.responseHeaders,
           "Content-Security-Policy": [
-            "default-src 'self' atelier:; script-src 'self' atelier:; style-src 'self' atelier:; img-src 'self' atelier: data: blob: https:; font-src 'self' atelier: data:; connect-src 'self' atelier: https://srfaeqhepmogxsdiympq.supabase.co https://*.supabase.co wss://srfaeqhepmogxsdiympq.supabase.co wss://*.supabase.co;",
+            "default-src 'self' devix:; script-src 'self' devix:; style-src 'self' devix:; img-src 'self' devix: data: blob: https:; font-src 'self' devix: data:; connect-src 'self' devix: https://srfaeqhepmogxsdiympq.supabase.co https://*.supabase.co wss://srfaeqhepmogxsdiympq.supabase.co wss://*.supabase.co;",
           ],
         },
       });
@@ -570,7 +570,7 @@ async function openOutlookDraft({ to, subject, body, attachmentPath }) {
   const payload = JSON.stringify({ to: to || "", subject: subject || "", body: body || "", attachmentPath });
   const script = `
 $ErrorActionPreference = "Stop"
-$data = $env:ATELIER_MAIL_PAYLOAD | ConvertFrom-Json
+$data = $env:DEVIX_MAIL_PAYLOAD | ConvertFrom-Json
 $outlook = New-Object -ComObject Outlook.Application
 $mail = $outlook.CreateItem(0)
 if ($data.to) { $mail.To = $data.to }
@@ -582,7 +582,7 @@ $mail.Display()
   await new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-"], {
       windowsHide: true,
-      env: { ...process.env, ATELIER_MAIL_PAYLOAD: payload },
+      env: { ...process.env, DEVIX_MAIL_PAYLOAD: payload },
       stdio: ["pipe", "ignore", "pipe"],
     });
     let stderr = "";
@@ -608,10 +608,10 @@ function chunkBase64(value) {
 }
 
 async function createEmlDraft({ to, subject, body, attachmentPath }) {
-  const boundary = `----=_AtelierDuBois_${crypto.randomUUID()}`;
+  const boundary = `----=_Devix_${crypto.randomUUID()}`;
   const attachmentName = path.basename(attachmentPath);
   const attachment = await fs.readFile(attachmentPath);
-  const emlPath = path.join(app.getPath("temp"), "atelier-du-bois", "emails", `${Date.now()}-message.eml`);
+  const emlPath = path.join(app.getPath("temp"), "devix", "emails", `${Date.now()}-message.eml`);
   const lines = [
     "X-Unsent: 1",
     to ? `To: ${to}` : "",
@@ -667,7 +667,7 @@ ipcMain.handle("dialog:save-excel", async (_event, { bytes, defaultPath }) => {
 
 ipcMain.handle("app:email-pdf", async (_event, { html, defaultPath, to, subject, body }) => {
   const fileName = path.basename(defaultPath || "document.pdf").replace(/[<>:"/\\|?*]+/g, "-");
-  const filePath = path.join(app.getPath("temp"), "atelier-du-bois", "emails", `${Date.now()}-${fileName}`);
+  const filePath = path.join(app.getPath("temp"), "devix", "emails", `${Date.now()}-${fileName}`);
   await createPdfFile(html, filePath);
 
   try {
