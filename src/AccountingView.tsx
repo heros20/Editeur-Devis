@@ -65,6 +65,7 @@ export function AccountingView({
   const [expenseDraft, setExpenseDraft] = useState<BusinessExpense>(() => emptyExpense());
   const [savingExpense, setSavingExpense] = useState(false);
   const report = useMemo(() => buildAccountingReport(data, period), [data, period]);
+  const expenseById = useMemo(() => new Map(report.expenses.map((expense) => [expense.id, expense])), [report.expenses]);
   const years = useMemo(() => {
     const available = data.documents.map((doc) => Number(doc.issueDate.slice(0, 4))).filter((value) => Number.isFinite(value));
     return [...new Set([currentYear(), year, ...available])].sort((a, b) => b - a);
@@ -155,7 +156,9 @@ export function AccountingView({
         <article>
           <span>Charges HT</span>
           <strong>{currency(report.operatingExpensesHt)}</strong>
-          <small>{report.expenses.length} dépense(s)</small>
+          <small>
+            {report.expenseDocumentCount} pièce(s), {report.expenseEntries.length} ligne(s)
+          </small>
         </article>
         <article>
           <span>Marge moyenne</span>
@@ -277,9 +280,9 @@ export function AccountingView({
         <div className="panelTitle">
           <div>
             <span className="eyebrow">Charges</span>
-            <h2>Dépenses enregistrées</h2>
+            <h2>Dépenses et factures fournisseur</h2>
           </div>
-          <span className="accountingCount">{report.expenses.length} dépense(s) sur la période</span>
+          <span className="accountingCount">{report.expenseEntries.length} ligne(s) sur la période</span>
         </div>
         {!readOnly && (
           <form className="expenseForm" onSubmit={submitExpense}>
@@ -386,9 +389,11 @@ export function AccountingView({
             <thead>
               <tr>
                 <th>Date</th>
+                <th>Source</th>
                 <th>Fournisseur</th>
                 <th>Catégorie / description</th>
                 <th>Référence</th>
+                <th>Qté</th>
                 <th>HT</th>
                 <th>TVA</th>
                 <th>TTC</th>
@@ -396,36 +401,56 @@ export function AccountingView({
               </tr>
             </thead>
             <tbody>
-              {report.expenses.length ? (
-                report.expenses.map((expense) => (
-                  <tr key={expense.id}>
-                    <td>{expense.date}</td>
-                    <td className="accountingPrimary">{expense.supplier || "—"}</td>
-                    <td className="accountingPrimary">
-                      <strong>{expense.category}</strong>
-                      <small>{expense.description}</small>
-                    </td>
-                    <td>{expense.reference || "—"}</td>
-                    <td>{currency(expense.amountHt)}</td>
-                    <td>{currency((expense.amountHt * expense.vatRate) / 100)}</td>
-                    <td>{currency(expense.amountHt * (1 + expense.vatRate / 100))}</td>
-                    {!readOnly && (
-                      <td>
-                        <button
-                          type="button"
-                          className="expenseDelete"
-                          aria-label={`Supprimer ${expense.description}`}
-                          onClick={() => void onDeleteExpense(expense)}
-                        >
-                          <Trash2 size={15} />
-                        </button>
+              {report.expenseEntries.length ? (
+                report.expenseEntries.map((expense) => {
+                  const sourceExpense = expense.expenseId ? expenseById.get(expense.expenseId) : undefined;
+                  const canDeleteSource = !readOnly && expense.source === "manual" && sourceExpense;
+                  return (
+                    <tr key={expense.id}>
+                      <td>{expense.date}</td>
+                      <td className="accountingPrimary">
+                        <strong>{expense.source === "purchaseInvoice" ? "Facture fournisseur" : "Dépense"}</strong>
+                        <small>{paymentMethodLabels[expense.paymentMethod]}</small>
                       </td>
-                    )}
-                  </tr>
-                ))
+                      <td className="accountingPrimary">{expense.supplier || "—"}</td>
+                      <td className="accountingPrimary">
+                        <strong>{expense.category}</strong>
+                        <small>{expense.description}</small>
+                      </td>
+                      <td>{expense.reference || "—"}</td>
+                      <td>
+                        {expense.source === "purchaseInvoice"
+                          ? `${new Intl.NumberFormat("fr-FR").format(expense.quantity)} ${expense.unit}`.trim()
+                          : "—"}
+                      </td>
+                      <td>{currency(expense.amountHt)}</td>
+                      <td>
+                        {currency(expense.vatAmount)}
+                        <small>{percent(expense.vatRate)}</small>
+                      </td>
+                      <td>{currency(expense.totalTtc)}</td>
+                      {!readOnly && (
+                        <td>
+                          {canDeleteSource ? (
+                            <button
+                              type="button"
+                              className="expenseDelete"
+                              aria-label={`Supprimer ${expense.description}`}
+                              onClick={() => void onDeleteExpense(sourceExpense!)}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          ) : (
+                            <span className="accountingLocked">Achats</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={readOnly ? 7 : 8} className="accountingEmpty">
+                  <td colSpan={readOnly ? 9 : 10} className="accountingEmpty">
                     Aucune dépense sur cette période.
                   </td>
                 </tr>
@@ -436,8 +461,8 @@ export function AccountingView({
       </section>
 
       <p className="accountingDisclaimer">
-        <Download size={15} /> Le résultat net tient compte des achats directs et des dépenses saisies. Toute charge absente de Devix reste
-        exclue.
+        <Download size={15} /> Le résultat net tient compte des achats directs, des dépenses saisies et des factures fournisseur validées.
+        Toute charge absente de Devix reste exclue.
       </p>
 
       {annualExportOpen && (

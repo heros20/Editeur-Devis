@@ -92,6 +92,8 @@ export interface PaymentEntry {
 
 export interface BusinessExpense {
   id: string;
+  archivedAt?: string;
+  archivedYear?: number;
   date: string;
   supplier: string;
   supplierId?: string;
@@ -120,6 +122,8 @@ export interface PurchaseInvoiceLine {
 
 export interface PurchaseInvoice {
   id: string;
+  archivedAt?: string;
+  archivedYear?: number;
   supplierId: string;
   supplier: string;
   reference: string;
@@ -142,6 +146,8 @@ export type PurchaseOrderStatus = "draft" | "sent" | "received";
 
 export interface PurchaseOrder {
   id: string;
+  archivedAt?: string;
+  archivedYear?: number;
   number: string;
   supplierId: string;
   supplier: string;
@@ -166,6 +172,8 @@ export interface PaymentReminder {
 
 export interface BusinessDocument {
   id: string;
+  archivedAt?: string;
+  archivedYear?: number;
   type: DocumentType;
   number: string;
   status: DocumentStatus;

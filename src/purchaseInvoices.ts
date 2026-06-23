@@ -1,4 +1,4 @@
-import type { BusinessExpense, CatalogItem, PurchaseInvoice, StockMovement } from "./types";
+import type { AppData, BusinessExpense, CatalogItem, PurchaseInvoice, StockMovement } from "./types";
 import { makeId } from "./utils";
 
 export function purchaseLinesTotals(lines: PurchaseInvoice["lines"]) {
@@ -17,9 +17,11 @@ export function purchaseInvoiceTotals(invoice: PurchaseInvoice) {
 export function purchaseInvoiceExpense(invoice: PurchaseInvoice, expenseId = invoice.expenseId || makeId("expense")): BusinessExpense {
   const totals = purchaseInvoiceTotals(invoice);
   const effectiveVatRate = totals.totalHt > 0 ? (totals.totalVat / totals.totalHt) * 100 : 0;
-  const now = new Date().toISOString();
+  const now = invoice.postedAt || invoice.updatedAt || new Date().toISOString();
   return {
     id: expenseId,
+    archivedAt: invoice.archivedAt,
+    archivedYear: invoice.archivedYear,
     date: invoice.invoiceDate,
     supplier: invoice.supplier,
     supplierId: invoice.supplierId,
@@ -36,6 +38,35 @@ export function purchaseInvoiceExpense(invoice: PurchaseInvoice, expenseId = inv
     purchaseInvoiceId: invoice.id,
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+export function syncPurchaseInvoiceExpenses(data: AppData): AppData {
+  const linkedExpenses = new Map<string, BusinessExpense>();
+  data.expenses.forEach((expense) => {
+    if (expense.purchaseInvoiceId) linkedExpenses.set(expense.purchaseInvoiceId, expense);
+  });
+
+  const syncedExpenses: BusinessExpense[] = [];
+  const purchaseInvoices = data.purchaseInvoices.map((invoice) => {
+    if (!invoice.supplierId || !invoice.reference.trim() || purchaseInvoiceTotals(invoice).totalHt <= 0) return invoice;
+    const existing = linkedExpenses.get(invoice.id) || data.expenses.find((expense) => expense.id === invoice.expenseId);
+    const expense = purchaseInvoiceExpense(invoice, existing?.id || invoice.expenseId);
+    syncedExpenses.push({
+      ...expense,
+      createdAt: existing?.createdAt || expense.createdAt,
+      updatedAt: invoice.updatedAt || existing?.updatedAt || expense.updatedAt,
+    });
+    return invoice.expenseId === expense.id ? invoice : { ...invoice, expenseId: expense.id };
+  });
+
+  const invoiceIds = new Set(purchaseInvoices.map((invoice) => invoice.id));
+  const manualExpenses = data.expenses.filter((expense) => !expense.purchaseInvoiceId || !invoiceIds.has(expense.purchaseInvoiceId));
+
+  return {
+    ...data,
+    purchaseInvoices,
+    expenses: [...syncedExpenses, ...manualExpenses].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
   };
 }
 

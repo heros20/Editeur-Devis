@@ -21,6 +21,7 @@ import type {
 } from "./types";
 import { addDaysIso, makeId, todayIso } from "./utils";
 import { defaultThemeId, isThemeId } from "./themes";
+import { syncPurchaseInvoiceExpenses } from "./purchaseInvoices";
 
 export const defaultCompany: CompanySettings = {
   themeId: defaultThemeId,
@@ -188,6 +189,8 @@ function normalizeExpense(expense: Partial<BusinessExpense>): BusinessExpense {
   const now = new Date().toISOString();
   return {
     id: expense.id || makeId("expense"),
+    archivedAt: expense.archivedAt,
+    archivedYear: expense.archivedYear,
     date: expense.date || todayIso(),
     supplier: expense.supplier || "",
     supplierId: expense.supplierId,
@@ -220,6 +223,8 @@ function normalizePurchaseInvoice(invoice: Partial<PurchaseInvoice>, defaultVatR
   const invoiceDate = invoice.invoiceDate || todayIso();
   return {
     id: invoice.id || makeId("purchase"),
+    archivedAt: invoice.archivedAt,
+    archivedYear: invoice.archivedYear,
     supplierId: invoice.supplierId || "",
     supplier: invoice.supplier || "",
     reference: invoice.reference || "",
@@ -244,6 +249,8 @@ function normalizePurchaseOrder(order: Partial<PurchaseOrder>, defaultVatRate: n
   const orderDate = order.orderDate || todayIso();
   return {
     id: order.id || makeId("purchase-order"),
+    archivedAt: order.archivedAt,
+    archivedYear: order.archivedYear,
     number: order.number || "BCF-0000",
     supplierId: order.supplierId || "",
     supplier: order.supplier || "",
@@ -411,6 +418,8 @@ function normalizeDocument(doc: Partial<BusinessDocument>, defaultVatRate: numbe
   const issueDate = doc.issueDate || todayIso();
   return {
     id: doc.id || makeId("doc"),
+    archivedAt: doc.archivedAt,
+    archivedYear: doc.archivedYear,
     type: normalizeDocumentType(doc.type, "quote"),
     number: doc.number || "DEV-0000",
     status: normalizeDocumentStatus(doc.status),
@@ -483,7 +492,7 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     return linkedSupplier ? { ...item, supplierId: linkedSupplier.id, supplier: linkedSupplier.name } : item;
   });
 
-  return {
+  return syncPurchaseInvoiceExpenses({
     company,
     counters: {
       ...fallback.counters,
@@ -510,5 +519,5 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
           return supplier ? { ...normalized, supplier: supplier.name } : normalized;
         })
       : fallback.purchaseOrders,
-  };
+  });
 }

@@ -1,4 +1,4 @@
-import type { AppData, BusinessDocument, BusinessExpense, Client, DocumentType, LineItem } from "./types";
+import type { AppData, BusinessDocument, BusinessExpense, Client, DocumentType, LineItem, PaymentMethod, PurchaseInvoice } from "./types";
 import { lineTotalHt, totals } from "./utils";
 
 export type AccountingDocumentType = Extract<DocumentType, "invoice" | "creditNote" | "returnInvoice">;
@@ -27,6 +27,31 @@ export interface AccountingEntry {
   totalTtc: number;
 }
 
+export type AccountingExpenseSource = "manual" | "purchaseInvoice";
+
+export interface AccountingExpenseEntry {
+  id: string;
+  expenseId?: string;
+  purchaseInvoiceId?: string;
+  purchaseOrderId?: string;
+  source: AccountingExpenseSource;
+  date: string;
+  dueDate: string;
+  supplier: string;
+  supplierId?: string;
+  reference: string;
+  category: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amountHt: number;
+  vatRate: number;
+  vatAmount: number;
+  totalTtc: number;
+  paymentMethod: PaymentMethod;
+}
+
 export interface AccountingMonth {
   key: string;
   label: string;
@@ -44,8 +69,10 @@ export interface AccountingReport {
   period: AccountingPeriod;
   entries: AccountingEntry[];
   expenses: BusinessExpense[];
+  expenseEntries: AccountingExpenseEntry[];
   months: AccountingMonth[];
   documentCount: number;
+  expenseDocumentCount: number;
   revenueHt: number;
   purchasesHt: number;
   operatingExpensesHt: number;
@@ -98,6 +125,101 @@ function entryFromLine(doc: BusinessDocument, client: Client | undefined, line: 
   };
 }
 
+function purchaseLineAmount(line: PurchaseInvoice["lines"][number]) {
+  return Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+}
+
+function purchaseInvoiceExpenseEntries(invoice: PurchaseInvoice, expense?: BusinessExpense): AccountingExpenseEntry[] {
+  return invoice.lines.map((line) => {
+    const amountHt = purchaseLineAmount(line);
+    const vatRate = Math.max(0, Number(line.vatRate) || 0);
+    const vatAmount = amountHt * (vatRate / 100);
+    return {
+      id: `${invoice.id}:${line.id}`,
+      expenseId: expense?.id || invoice.expenseId,
+      purchaseInvoiceId: invoice.id,
+      purchaseOrderId: invoice.purchaseOrderId,
+      source: "purchaseInvoice",
+      date: invoice.invoiceDate,
+      dueDate: invoice.dueDate,
+      supplier: invoice.supplier,
+      supplierId: invoice.supplierId,
+      reference: invoice.reference,
+      category: expense?.category || "Achats fournisseurs",
+      description: line.description || `Facture ${invoice.reference}`,
+      quantity: Number(line.quantity) || 0,
+      unit: line.unit || "",
+      unitPrice: Number(line.unitPrice) || 0,
+      amountHt: round(amountHt),
+      vatRate: round(vatRate),
+      vatAmount: round(vatAmount),
+      totalTtc: round(amountHt + vatAmount),
+      paymentMethod: invoice.paymentMethod,
+    };
+  });
+}
+
+function manualExpenseEntry(expense: BusinessExpense): AccountingExpenseEntry {
+  const vatAmount = expense.amountHt * ((Number(expense.vatRate) || 0) / 100);
+  return {
+    id: expense.id,
+    expenseId: expense.id,
+    purchaseInvoiceId: expense.purchaseInvoiceId,
+    source: "manual",
+    date: expense.date,
+    dueDate: "",
+    supplier: expense.supplier,
+    supplierId: expense.supplierId,
+    reference: expense.reference,
+    category: expense.category,
+    description: expense.description,
+    quantity: 1,
+    unit: "",
+    unitPrice: expense.amountHt,
+    amountHt: round(expense.amountHt),
+    vatRate: round(Number(expense.vatRate) || 0),
+    vatAmount: round(vatAmount),
+    totalTtc: round(expense.amountHt + vatAmount),
+    paymentMethod: expense.paymentMethod,
+  };
+}
+
+function inPeriod(date: string, period: AccountingPeriod) {
+  return date >= period.startDate && date <= period.endDate;
+}
+
+export function buildAccountingExpenseEntries(data: AppData, period: AccountingPeriod): AccountingExpenseEntry[] {
+  const handledInvoices = new Set<string>();
+  const entries: AccountingExpenseEntry[] = [];
+
+  data.expenses.forEach((expense) => {
+    if (expense.purchaseInvoiceId) {
+      const invoice = data.purchaseInvoices.find((item) => item.id === expense.purchaseInvoiceId);
+      if (invoice) {
+        handledInvoices.add(invoice.id);
+        entries.push(...purchaseInvoiceExpenseEntries(invoice, expense));
+        return;
+      }
+    }
+    entries.push(manualExpenseEntry(expense));
+  });
+
+  data.purchaseInvoices
+    .filter((invoice) => !handledInvoices.has(invoice.id) && invoice.supplierId && invoice.reference.trim())
+    .filter((invoice) => invoice.lines.some((line) => purchaseLineAmount(line) > 0))
+    .forEach((invoice) => entries.push(...purchaseInvoiceExpenseEntries(invoice)));
+
+  return entries
+    .filter((entry) => inPeriod(entry.date, period))
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.supplier.localeCompare(b.supplier, "fr") ||
+        a.reference.localeCompare(b.reference, "fr") ||
+        a.description.localeCompare(b.description, "fr")
+    );
+}
+
 export function annualPeriod(year: number): AccountingPeriod {
   return { startDate: `${year}-01-01`, endDate: `${year}-12-31` };
 }
@@ -113,9 +235,11 @@ function monthLabel(key: string) {
   return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}-01T00:00:00Z`));
 }
 
+// Rappel d'architecture: toute nouvelle zone qui cree une vente ou une depense doit alimenter
+// data.documents, data.expenses ou data.purchaseInvoices pour rester visible dans le livre de comptes.
 export function buildAccountingReport(data: AppData, period: AccountingPeriod): AccountingReport {
   const documents = data.documents.filter(
-    (doc) => accountingTypes.has(doc.type as AccountingDocumentType) && doc.issueDate >= period.startDate && doc.issueDate <= period.endDate
+    (doc) => accountingTypes.has(doc.type as AccountingDocumentType) && inPeriod(doc.issueDate, period)
   );
   const entries = documents
     .flatMap((doc) => {
@@ -124,8 +248,9 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
     })
     .sort((a, b) => a.date.localeCompare(b.date) || a.documentNumber.localeCompare(b.documentNumber));
   const expenses = [...data.expenses]
-    .filter((expense) => expense.date >= period.startDate && expense.date <= period.endDate)
+    .filter((expense) => inPeriod(expense.date, period))
     .sort((a, b) => a.date.localeCompare(b.date) || a.supplier.localeCompare(b.supplier, "fr"));
+  const expenseEntries = buildAccountingExpenseEntries(data, period);
 
   const sums = entries.reduce(
     (acc, entry) => ({
@@ -150,7 +275,7 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
     byMonth.set(key, current);
   });
   const expensesByMonth = new Map<string, number>();
-  expenses.forEach((expense) => {
+  expenseEntries.forEach((expense) => {
     const key = expense.date.slice(0, 7);
     expensesByMonth.set(key, (expensesByMonth.get(key) || 0) + expense.amountHt);
     if (!byMonth.has(key)) {
@@ -175,15 +300,18 @@ export function buildAccountingReport(data: AppData, period: AccountingPeriod): 
         netProfit: round(values.marginAmount - operatingExpensesHt),
       };
     });
-  const operatingExpensesHt = expenses.reduce((sum, expense) => sum + expense.amountHt, 0);
-  const deductibleVat = expenses.reduce((sum, expense) => sum + expense.amountHt * ((Number(expense.vatRate) || 0) / 100), 0);
+  const operatingExpensesHt = expenseEntries.reduce((sum, expense) => sum + expense.amountHt, 0);
+  const deductibleVat = expenseEntries.reduce((sum, expense) => sum + expense.vatAmount, 0);
+  const expenseDocumentCount = new Set(expenseEntries.map((expense) => expense.purchaseInvoiceId || expense.expenseId || expense.id)).size;
 
   return {
     period,
     entries,
     expenses,
+    expenseEntries,
     months,
     documentCount: new Set(entries.map((entry) => entry.documentId)).size,
+    expenseDocumentCount,
     revenueHt: round(sums.revenueHt),
     purchasesHt: round(sums.purchasesHt),
     operatingExpensesHt: round(operatingExpensesHt),

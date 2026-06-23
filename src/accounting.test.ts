@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { annualPeriod, buildAccountingReport } from "./accounting";
 import { buildAccountingXlsx, renderAccountingHtml } from "./accountingExport";
 import { createDefaultAppData, normalizeData } from "./defaultData";
-import type { BusinessDocument, BusinessExpense, CatalogItem, LineItem, Supplier } from "./types";
+import type { BusinessDocument, BusinessExpense, CatalogItem, LineItem, PurchaseInvoice, Supplier } from "./types";
 import { unzipSync } from "fflate";
 
 function line(partial: Partial<LineItem> = {}): LineItem {
@@ -46,6 +46,30 @@ function document(partial: Partial<BusinessDocument> = {}): BusinessDocument {
     history: [],
     createdAt: "2026-06-10T00:00:00.000Z",
     updatedAt: "2026-06-10T00:00:00.000Z",
+    ...partial,
+  };
+}
+
+function purchaseInvoice(partial: Partial<PurchaseInvoice> = {}): PurchaseInvoice {
+  return {
+    id: "purchase-1",
+    supplierId: "supplier-1",
+    supplier: "Bois Pro",
+    reference: "FA-100",
+    invoiceDate: "2026-06-12",
+    dueDate: "2026-07-12",
+    status: "posted",
+    paymentMethod: "bank_transfer",
+    notes: "",
+    lines: [
+      { id: "purchase-line-1", description: "Panneaux", unit: "u", quantity: 3, unitPrice: 40, vatRate: 20 },
+      { id: "purchase-line-2", description: "Transport", unit: "forfait", quantity: 1, unitPrice: 10, vatRate: 10 },
+    ],
+    attachments: [],
+    expenseId: "expense-purchase-1",
+    postedAt: "2026-06-12T00:00:00.000Z",
+    createdAt: "2026-06-12T00:00:00.000Z",
+    updatedAt: "2026-06-12T00:00:00.000Z",
     ...partial,
   };
 }
@@ -138,6 +162,55 @@ describe("accounting report", () => {
     expect(report.deductibleVat).toBe(10);
     expect(report.vatBalance).toBe(30);
     expect(report.months[0].netProfit).toBe(70);
+  });
+
+  it("details posted supplier invoices line by line without double-counting the linked expense", () => {
+    const data = createDefaultAppData();
+    data.documents = [document()];
+    data.purchaseInvoices = [purchaseInvoice()];
+    data.expenses = [
+      {
+        id: "expense-purchase-1",
+        date: "2026-06-12",
+        supplier: "Bois Pro",
+        supplierId: "supplier-1",
+        reference: "FA-100",
+        category: "Achats fournisseurs",
+        description: "Panneaux, Transport",
+        amountHt: 130,
+        vatRate: 25 / 1.3,
+        paymentMethod: "bank_transfer",
+        purchaseInvoiceId: "purchase-1",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        updatedAt: "2026-06-12T00:00:00.000Z",
+      },
+    ];
+
+    const report = buildAccountingReport(data, annualPeriod(2026));
+
+    expect(report.expenseEntries).toHaveLength(2);
+    expect(report.expenseDocumentCount).toBe(1);
+    expect(report.operatingExpensesHt).toBe(130);
+    expect(report.deductibleVat).toBe(25);
+    expect(report.expenseEntries[0]).toMatchObject({
+      source: "purchaseInvoice",
+      purchaseInvoiceId: "purchase-1",
+      description: "Panneaux",
+      quantity: 3,
+      amountHt: 120,
+      vatAmount: 24,
+    });
+  });
+
+  it("includes posted supplier invoices even when their accounting expense is missing", () => {
+    const data = createDefaultAppData();
+    data.purchaseInvoices = [purchaseInvoice({ expenseId: undefined })];
+
+    const report = buildAccountingReport(data, annualPeriod(2026));
+
+    expect(report.expenseEntries).toHaveLength(2);
+    expect(report.operatingExpensesHt).toBe(130);
+    expect(report.expenseDocumentCount).toBe(1);
   });
 
   it("generates a valid xlsx package and a printable report", () => {

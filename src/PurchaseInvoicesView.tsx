@@ -61,14 +61,21 @@ export function PurchaseInvoicesView({
   onRemoveAttachment: (invoice: PurchaseInvoice, attachment: DocumentAttachment) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(invoices[0]?.id || "");
-  const [draft, setDraft] = useState<PurchaseInvoice | null>(invoices[0] ? { ...invoices[0], lines: [...invoices[0].lines] } : null);
+  const [selectedId, setSelectedId] = useState("");
+  const [draft, setDraft] = useState<PurchaseInvoice | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId) {
+      setDraft(null);
+      return;
+    }
     const updated = invoices.find((invoice) => invoice.id === selectedId);
     if (updated) setDraft({ ...updated, lines: [...updated.lines] });
+    else {
+      setSelectedId("");
+      setDraft(null);
+    }
   }, [invoices, selectedId]);
 
   const filteredInvoices = useMemo(() => {
@@ -135,7 +142,7 @@ export function PurchaseInvoicesView({
   );
 
   return (
-    <section className="purchaseLayout">
+    <section className={draft ? "purchaseLayout" : "purchaseLayout purchaseLayoutCardsOnly"}>
       <aside className="panel purchaseListPane">
         <div className="searchBox">
           <Search size={17} />
@@ -166,7 +173,7 @@ export function PurchaseInvoicesView({
                 <span>
                   <strong>{invoice.reference || "Sans référence"}</strong>
                   <em className={invoice.status === "posted" ? "posted" : "draft"}>
-                    {invoice.status === "posted" ? "Validée" : "Brouillon"}
+                    {invoice.status === "posted" ? "Validée" : "À préparer"}
                   </em>
                 </span>
                 <b>{invoice.supplier || "Fournisseur à sélectionner"}</b>
@@ -180,8 +187,8 @@ export function PurchaseInvoicesView({
         </div>
       </aside>
 
-      <section className="panel purchaseEditor">
-        {draft ? (
+      {draft && (
+        <section className="panel purchaseEditor">
           <form onSubmit={save}>
             <div className="panelTitle purchaseHeader">
               <div>
@@ -216,7 +223,7 @@ export function PurchaseInvoicesView({
                 {!readOnly && draft.status === "draft" && (
                   <>
                     <button type="submit" className="ghost" disabled={busy}>
-                      <Save size={17} /> Enregistrer le brouillon
+                      <Save size={17} /> Enregistrer
                     </button>
                     <button type="button" disabled={busy || !validForPosting} onClick={() => void run(onPost)}>
                       <CheckCircle2 size={17} /> Valider la facture
@@ -445,14 +452,8 @@ export function PurchaseInvoicesView({
               </div>
             </div>
           </form>
-        ) : (
-          <div className="emptyState">
-            <ShoppingCart size={42} />
-            <h2>Aucune facture fournisseur sélectionnée</h2>
-            <p>Créez une facture directe ou réceptionnez d’abord une commande fournisseur.</p>
-          </div>
-        )}
-      </section>
+        </section>
+      )}
     </section>
   );
 }

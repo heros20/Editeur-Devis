@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyPurchaseInvoiceStockImpact, purchaseInvoiceExpense, purchaseInvoiceTotals } from "./purchaseInvoices";
+import { applyPurchaseInvoiceStockImpact, purchaseInvoiceExpense, purchaseInvoiceTotals, syncPurchaseInvoiceExpenses } from "./purchaseInvoices";
+import { createDefaultAppData } from "./defaultData";
 import type { CatalogItem, PurchaseInvoice } from "./types";
 
 const invoice = (): PurchaseInvoice => ({
@@ -53,6 +54,35 @@ describe("purchase invoices", () => {
       amountHt: 130,
     });
     expect(expense.vatRate).toBeCloseTo(25 / 1.3, 10);
+  });
+
+  it("backfills and refreshes accounting expenses for supplier invoices", () => {
+    const data = createDefaultAppData();
+    data.purchaseInvoices = [{ ...invoice(), status: "draft", expenseId: undefined }];
+    const synced = syncPurchaseInvoiceExpenses(data);
+
+    expect(synced.purchaseInvoices[0].expenseId).toBe(synced.expenses[0].id);
+    expect(synced.expenses[0]).toMatchObject({
+      purchaseInvoiceId: "purchase-1",
+      supplier: "Bois Pro",
+      reference: "FA-100",
+      amountHt: 130,
+    });
+  });
+
+  it("updates the linked accounting expense when the supplier invoice number changes", () => {
+    const data = createDefaultAppData();
+    data.purchaseInvoices = [{ ...invoice(), reference: "FA-101", expenseId: "expense-1" }];
+    data.expenses = [purchaseInvoiceExpense({ ...invoice(), reference: "FA-100" }, "expense-1")];
+
+    const synced = syncPurchaseInvoiceExpenses(data);
+
+    expect(synced.expenses).toHaveLength(1);
+    expect(synced.expenses[0]).toMatchObject({
+      id: "expense-1",
+      purchaseInvoiceId: "purchase-1",
+      reference: "FA-101",
+    });
   });
 
   it("adds stock on posting and removes it on cancellation", () => {

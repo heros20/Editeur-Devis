@@ -18,7 +18,7 @@ export const labels: Record<DocumentType, string> = {
 };
 
 export const statusLabels: Record<string, string> = {
-  draft: "Brouillon",
+  draft: "En cours",
   partial: "Partiel",
   paid: "Payé",
 };

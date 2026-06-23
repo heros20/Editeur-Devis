@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, Mail, Plus, ReceiptText, Save, Search, ShoppingCart, Trash2, X } from "lucide-react";
+import { CheckCircle2, FileText, Mail, Plus, ReceiptText, Save, Search, Trash2, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { purchaseLinesTotals } from "./purchaseInvoices";
 import { nextPurchaseOrderNumber } from "./purchaseOrders";
@@ -61,12 +61,20 @@ export function PurchaseOrdersView({
   onRemoveAttachment: (order: PurchaseOrder, attachment: DocumentAttachment) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(orders[0]?.id || "");
-  const [draft, setDraft] = useState<PurchaseOrder | null>(orders[0] ? { ...orders[0], lines: [...orders[0].lines] } : null);
+  const [selectedId, setSelectedId] = useState("");
+  const [draft, setDraft] = useState<PurchaseOrder | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
+    if (!selectedId) {
+      setDraft(null);
+      return;
+    }
     const updated = orders.find((order) => order.id === selectedId);
     if (updated) setDraft({ ...updated, lines: updated.lines.map((line) => ({ ...line })) });
+    else {
+      setSelectedId("");
+      setDraft(null);
+    }
   }, [orders, selectedId]);
   const filtered = useMemo(() => {
     const search = query.trim().toLocaleLowerCase("fr");
@@ -84,7 +92,7 @@ export function PurchaseOrdersView({
     draft.lines.length &&
     draft.lines.every((line) => line.description.trim() && line.quantity > 0 && line.unitPrice >= 0)
   );
-  const statusLabel = draft?.status === "received" ? "Réceptionnée" : draft?.status === "sent" ? "Commandée" : "Brouillon";
+  const statusLabel = draft?.status === "received" ? "Réceptionnée" : draft?.status === "sent" ? "Commandée" : "À préparer";
 
   function patchLine(id: string, partial: Partial<PurchaseInvoiceLine>) {
     if (draft) setDraft({ ...draft, lines: draft.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
@@ -118,7 +126,7 @@ export function PurchaseOrdersView({
   }
 
   return (
-    <section className="purchaseLayout">
+    <section className={draft ? "purchaseLayout" : "purchaseLayout purchaseLayoutCardsOnly"}>
       <aside className="panel purchaseListPane">
         <div className="searchBox">
           <Search size={17} />
@@ -152,7 +160,7 @@ export function PurchaseOrdersView({
                 <span>
                   <strong>{order.number}</strong>
                   <em className={order.status === "received" ? "posted" : "draft"}>
-                    {order.status === "received" ? "Reçue" : order.status === "sent" ? "Commandée" : "Brouillon"}
+                    {order.status === "received" ? "Reçue" : order.status === "sent" ? "Commandée" : "À préparer"}
                   </em>
                 </span>
                 <b>{order.supplier || "Fournisseur à sélectionner"}</b>
@@ -165,8 +173,8 @@ export function PurchaseOrdersView({
           {!filtered.length && <div className="emptyRows">Aucune commande fournisseur.</div>}
         </div>
       </aside>
-      <section className="panel purchaseEditor">
-        {draft ? (
+      {draft && (
+        <section className="panel purchaseEditor">
           <form onSubmit={save}>
             <div className="panelTitle purchaseHeader">
               <div>
@@ -368,14 +376,8 @@ export function PurchaseOrdersView({
               </div>
             </div>
           </form>
-        ) : (
-          <div className="emptyState">
-            <ShoppingCart size={42} />
-            <h2>Commencez par une commande fournisseur</h2>
-            <p>Choisissez « Nouvelle commande fournisseur », ajoutez les articles puis marquez-la comme commandée.</p>
-          </div>
-        )}
-      </section>
+        </section>
+      )}
     </section>
   );
 }

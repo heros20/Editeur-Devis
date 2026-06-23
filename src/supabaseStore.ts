@@ -61,8 +61,8 @@ export const supabase = createClient(clientUrl, clientKey, {
   },
 });
 
-export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
-export type InviteRole = Exclude<WorkspaceRole, "owner">;
+export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer" | "superadmin";
+export type InviteRole = Exclude<WorkspaceRole, "owner" | "superadmin">;
 
 export interface WorkspaceContext {
   organizationId: string;
@@ -84,8 +84,10 @@ interface MembershipRow {
 }
 
 interface WorkspaceRow {
+  organization_id?: string;
   data: Partial<AppData> | null;
   updated_at: string;
+  organizations?: OrganizationRow | null;
 }
 
 interface CounterRow {
@@ -128,6 +130,13 @@ export interface TeamInvitation {
   acceptedAt: string | null;
   expiresAt: string;
   createdAt: string;
+}
+
+export interface SuperadminWorkspace {
+  organizationId: string;
+  organizationName: string;
+  updatedAt: string;
+  data: AppData;
 }
 
 function assertRemoteError(error: unknown) {
@@ -315,6 +324,19 @@ async function getMembership(organizationId: string, userId: string) {
   return data;
 }
 
+async function isCurrentUserSuperadmin() {
+  const session = await getCurrentSession();
+  if (!session) return false;
+  const email = (session.user.email || "").trim().toLowerCase();
+  const { data, error } = await supabase
+    .from("superadmins")
+    .select("id")
+    .or(`user_id.eq.${session.user.id},email.eq.${email}`)
+    .maybeSingle<{ id: string }>();
+  assertRemoteError(error);
+  return Boolean(data);
+}
+
 async function getFirstMembership(userId: string) {
   const { data, error } = await supabase
     .from("organization_members")
@@ -337,6 +359,24 @@ function mapTeamInvitation(row: TeamInvitationRow): TeamInvitation {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
   };
+}
+
+function attachmentStoragePaths(data: AppData) {
+  const paths = new Set<string>();
+  const collect = (attachments: DocumentAttachment[]) => {
+    attachments.forEach((attachment) => {
+      const path = attachment.storagePath || attachment.filePath;
+      if (path) paths.add(path);
+    });
+  };
+
+  data.documents.forEach((document) => {
+    collect(document.attachments || []);
+    document.history.forEach((entry) => collect(entry.snapshot.attachments || []));
+  });
+  data.purchaseOrders.forEach((order) => collect(order.attachments || []));
+  data.purchaseInvoices.forEach((invoice) => collect(invoice.attachments || []));
+  return [...paths];
 }
 
 async function getWorkspaceData(organization: OrganizationRow) {
@@ -381,6 +421,7 @@ export async function loadRemoteWorkspace(preferredOrganizationId?: string) {
 
   const invitedOrganizationId = preferredOrganizationId ? "" : await claimPendingInvitation();
   const targetOrganizationId = preferredOrganizationId || invitedOrganizationId;
+  const superadmin = await isCurrentUserSuperadmin();
   let membership = targetOrganizationId
     ? await getMembership(targetOrganizationId, session.user.id)
     : await getFirstMembership(session.user.id);
@@ -397,12 +438,54 @@ export async function loadRemoteWorkspace(preferredOrganizationId?: string) {
   const context: WorkspaceContext = {
     organizationId: organization.id,
     organizationName: organization.name,
-    role: membership.role,
+    role: superadmin ? "superadmin" : membership.role,
     userEmail: session.user.email || membership.email || "",
     workspaceUpdatedAt: workspaceData.updatedAt,
   };
 
   return { context, data: workspaceData.data };
+}
+
+export async function listSuperadminWorkspaces(): Promise<SuperadminWorkspace[]> {
+  assertSupabaseConfigured();
+  if (!(await isCurrentUserSuperadmin())) throw new Error("Accès superadmin requis.");
+
+  const { data, error } = await supabase
+    .from("organization_workspaces")
+    .select("organization_id, data, updated_at, organizations(id, name)")
+    .order("updated_at", { ascending: false })
+    .returns<WorkspaceRow[]>();
+  assertRemoteError(error);
+
+  return (data || []).map((row) => ({
+    organizationId: row.organization_id || row.organizations?.id || "",
+    organizationName: row.organizations?.name || "Entreprise sans nom",
+    updatedAt: row.updated_at || "",
+    data: normalizeData(row.data || {}),
+  }));
+}
+
+export async function deleteSuperadminOrganization(organizationId: string) {
+  assertSupabaseConfigured();
+  if (!(await isCurrentUserSuperadmin())) throw new Error("Accès superadmin requis.");
+  if (!organizationId) throw new Error("Entreprise introuvable.");
+
+  const { data: workspaceRows, error: workspaceError } = await supabase
+    .from("organization_workspaces")
+    .select("data")
+    .eq("organization_id", organizationId)
+    .returns<Array<{ data: Partial<AppData> | null }>>();
+  assertRemoteError(workspaceError);
+
+  const workspaceData = normalizeData(workspaceRows?.[0]?.data || {});
+  const paths = attachmentStoragePaths(workspaceData).filter((path) => path.startsWith(`${organizationId}/`));
+  for (let index = 0; index < paths.length; index += 1000) {
+    const { error: storageError } = await supabase.storage.from(attachmentsBucket).remove(paths.slice(index, index + 1000));
+    assertRemoteError(storageError);
+  }
+
+  const { error } = await supabase.rpc("delete_superadmin_organization", { target_organization_id: organizationId });
+  assertRemoteError(error);
 }
 
 export async function listTeamMembers(context: WorkspaceContext) {

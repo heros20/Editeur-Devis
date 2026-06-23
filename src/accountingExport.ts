@@ -15,6 +15,10 @@ function percent(value: number) {
   return new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value || 0) + " %";
 }
 
+function expenseSourceLabel(source: string) {
+  return source === "purchaseInvoice" ? "Facture fournisseur" : "Dépense";
+}
+
 export function renderAccountingHtml(report: AccountingReport, company: CompanySettings) {
   const monthlyRows = report.months
     .map(
@@ -28,10 +32,10 @@ export function renderAccountingHtml(report: AccountingReport, company: CompanyS
         `<tr><td>${esc(entry.date)}</td><td>${esc(entry.documentNumber)}</td><td>${esc(labels[entry.documentType])}</td><td>${esc(entry.client)}</td><td>${esc(entry.description)}</td><td class="num">${currency(entry.purchaseHt)}</td><td class="num">${currency(entry.saleHt)}</td><td class="num">${currency(entry.marginAmount)}</td><td class="num">${percent(entry.marginRate)}</td></tr>`
     )
     .join("");
-  const expenseRows = report.expenses
+  const expenseRows = report.expenseEntries
     .map(
       (expense) =>
-        `<tr><td>${esc(expense.date)}</td><td>${esc(expense.supplier)}</td><td>${esc(expense.reference)}</td><td>${esc(expense.category)}</td><td>${esc(expense.description)}</td><td class="num">${currency(expense.amountHt)}</td><td class="num">${percent(expense.vatRate)}</td><td class="num">${currency(expense.amountHt * (1 + expense.vatRate / 100))}</td></tr>`
+        `<tr><td>${esc(expense.date)}</td><td>${esc(expenseSourceLabel(expense.source))}</td><td>${esc(expense.supplier)}</td><td>${esc(expense.reference)}</td><td>${esc(expense.category)}</td><td>${esc(expense.description)}</td><td class="num">${esc(expense.source === "purchaseInvoice" ? expense.quantity : "")}</td><td>${esc(expense.unit)}</td><td class="num">${currency(expense.amountHt)}</td><td class="num">${percent(expense.vatRate)}</td><td class="num">${currency(expense.totalTtc)}</td></tr>`
     )
     .join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
@@ -40,8 +44,8 @@ export function renderAccountingHtml(report: AccountingReport, company: CompanyS
   <section class="kpis"><div class="kpi"><span>Chiffre d’affaires HT</span><strong>${currency(report.revenueHt)}</strong></div><div class="kpi"><span>Achats directs HT</span><strong>${currency(report.purchasesHt)}</strong></div><div class="kpi"><span>Charges HT</span><strong>${currency(report.operatingExpensesHt)}</strong></div><div class="kpi"><span>Marge moyenne</span><strong>${percent(report.averageMarginRate)}</strong></div><div class="kpi"><span>Résultat net</span><strong>${currency(report.netProfit)}</strong></div><div class="kpi"><span>Solde TVA</span><strong>${currency(report.vatBalance)}</strong></div></section>
   <h2>Synthèse mensuelle</h2><table><thead><tr><th>Mois</th><th class="num">CA HT</th><th class="num">Achats directs</th><th class="num">Charges</th><th class="num">Marge</th><th class="num">Résultat</th><th class="num">Taux de marge</th></tr></thead><tbody>${monthlyRows || '<tr><td colspan="7">Aucune écriture sur la période.</td></tr>'}</tbody></table>
   <section class="detail"><h2>Détail des achats et ventes</h2><table><thead><tr><th>Date</th><th>Document</th><th>Type</th><th>Client</th><th>Désignation</th><th class="num">Achat HT</th><th class="num">Vente HT</th><th class="num">Marge</th><th class="num">%</th></tr></thead><tbody>${detailRows || '<tr><td colspan="9">Aucune écriture sur la période.</td></tr>'}</tbody></table></section>
-  <section class="detail"><h2>Dépenses et charges</h2><table><thead><tr><th>Date</th><th>Fournisseur</th><th>Référence</th><th>Catégorie</th><th>Description</th><th class="num">HT</th><th class="num">TVA</th><th class="num">TTC</th></tr></thead><tbody>${expenseRows || '<tr><td colspan="8">Aucune dépense sur la période.</td></tr>'}</tbody></table></section>
-  <p class="note">Le résultat net correspond à la marge sur ventes diminuée des dépenses enregistrées. Toute charge non saisie dans Devix reste exclue du calcul.</p></body></html>`;
+  <section class="detail"><h2>Dépenses, charges et factures fournisseur</h2><table><thead><tr><th>Date</th><th>Source</th><th>Fournisseur</th><th>Référence</th><th>Catégorie</th><th>Description</th><th class="num">Qté</th><th>Unité</th><th class="num">HT</th><th class="num">TVA</th><th class="num">TTC</th></tr></thead><tbody>${expenseRows || '<tr><td colspan="11">Aucune dépense sur la période.</td></tr>'}</tbody></table></section>
+  <p class="note">Le résultat net correspond à la marge sur ventes diminuée des dépenses enregistrées et des factures fournisseur validées. Toute charge non saisie dans Devix reste exclue du calcul.</p></body></html>`;
 }
 
 type Cell = string | number;
@@ -137,17 +141,36 @@ export function buildAccountingXlsx(report: AccountingReport, company: CompanySe
     ]),
   ];
   const expenses: Cell[][] = [
-    ["Date", "Fournisseur", "Référence", "Catégorie", "Description", "Montant HT", "TVA (%)", "TVA", "Montant TTC", "Paiement"],
-    ...report.expenses.map((expense) => [
+    [
+      "Date",
+      "Source",
+      "Fournisseur",
+      "Référence",
+      "Catégorie",
+      "Description",
+      "Quantité",
+      "Unité",
+      "Prix unitaire HT",
+      "Montant HT",
+      "TVA (%)",
+      "TVA",
+      "Montant TTC",
+      "Paiement",
+    ],
+    ...report.expenseEntries.map((expense) => [
       expense.date,
+      expenseSourceLabel(expense.source),
       expense.supplier,
       expense.reference,
       expense.category,
       expense.description,
+      expense.source === "purchaseInvoice" ? expense.quantity : "",
+      expense.unit,
+      expense.source === "purchaseInvoice" ? expense.unitPrice : "",
       expense.amountHt,
       expense.vatRate,
-      (expense.amountHt * expense.vatRate) / 100,
-      expense.amountHt * (1 + expense.vatRate / 100),
+      expense.vatAmount,
+      expense.totalTtc,
       paymentMethodLabels[expense.paymentMethod],
     ]),
   ];
@@ -169,7 +192,7 @@ export function buildAccountingXlsx(report: AccountingReport, company: CompanySe
     ),
     "xl/worksheets/sheet1.xml": strToU8(worksheetXml(summary, [30, 20, 18, 18, 18, 18, 15, 18, 18])),
     "xl/worksheets/sheet2.xml": strToU8(worksheetXml(details, [12, 18, 19, 24, 24, 34, 12, 10, 15, 15, 15, 14, 15, 15])),
-    "xl/worksheets/sheet3.xml": strToU8(worksheetXml(expenses, [12, 24, 18, 20, 34, 15, 12, 15, 15, 16])),
+    "xl/worksheets/sheet3.xml": strToU8(worksheetXml(expenses, [12, 20, 24, 18, 20, 34, 12, 10, 16, 15, 12, 15, 15, 16])),
   };
   return zipSync(files, { level: 6 });
 }

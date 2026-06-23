@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Archive,
   Building2,
   BookOpenCheck,
   Check,
@@ -26,6 +27,7 @@ import {
   Save,
   Search,
   Settings,
+  ShieldCheck,
   Trash2,
   Truck,
   UserPlus,
@@ -51,10 +53,12 @@ import {
   createTeamInvitation,
   deleteCurrentAccount,
   deleteRemoteAttachment,
+  deleteSuperadminOrganization,
   deleteTeamInvitation,
   getCurrentSession,
   listTeamInvitations,
   listTeamMembers,
+  listSuperadminWorkspaces,
   loadRemoteWorkspace,
   onRemoteAuthStateChange,
   openRemoteAttachment,
@@ -72,6 +76,7 @@ import {
   type InviteRole,
   type TeamInvitation,
   type TeamMember,
+  type SuperadminWorkspace,
   type WorkspaceContext,
   type WorkspaceRole,
 } from "./supabaseStore";
@@ -124,6 +129,8 @@ type View =
   | "catalog"
   | "clients"
   | "company"
+  | "archives"
+  | "superadmin"
   | "settings";
 type AuthMode = "signin" | "signup";
 type ReminderDraft = Pick<PaymentReminder, "sentAt" | "channel" | "note">;
@@ -131,6 +138,7 @@ type ReminderSendResult = { success: boolean; message: string };
 type DocumentSaveState = "saved" | "dirty" | "saving" | "error";
 
 const roleLabels: Record<WorkspaceRole, string> = {
+  superadmin: "Superadmin",
   owner: "Propriétaire",
   admin: "Admin",
   editor: "Édition",
@@ -181,6 +189,47 @@ function fileSizeLabel(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
+function isArchived(item: { archivedYear?: number; archivedAt?: string }) {
+  return Boolean(item.archivedYear || item.archivedAt);
+}
+
+function documentYear(doc: BusinessDocument) {
+  return Number((doc.issueDate || doc.createdAt || "").slice(0, 4));
+}
+
+function expenseYear(expense: BusinessExpense) {
+  return Number((expense.date || expense.createdAt || "").slice(0, 4));
+}
+
+function purchaseInvoiceYear(invoice: PurchaseInvoice) {
+  return Number((invoice.invoiceDate || invoice.createdAt || "").slice(0, 4));
+}
+
+function purchaseOrderYear(order: PurchaseOrder) {
+  return Number((order.orderDate || order.createdAt || "").slice(0, 4));
+}
+
+function archiveYears(data: AppData) {
+  return [
+    ...data.documents.map((doc) => doc.archivedYear),
+    ...data.expenses.map((expense) => expense.archivedYear),
+    ...data.purchaseInvoices.map((invoice) => invoice.archivedYear),
+    ...data.purchaseOrders.map((order) => order.archivedYear),
+  ]
+    .filter((year): year is number => Number.isFinite(year))
+    .sort((a, b) => b - a);
+}
+
+function dataForArchiveYear(data: AppData, year: number): AppData {
+  return normalizeData({
+    ...data,
+    documents: data.documents.filter((doc) => doc.archivedYear === year),
+    expenses: data.expenses.filter((expense) => expense.archivedYear === year),
+    purchaseInvoices: data.purchaseInvoices.filter((invoice) => invoice.archivedYear === year),
+    purchaseOrders: data.purchaseOrders.filter((order) => order.archivedYear === year),
+  });
+}
+
 function requiredDiscountForMargin(line: LineItem, targetMargin: number) {
   const gross = (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0);
   const purchaseTotal = (Number(line.quantity) || 0) * (Number(line.purchasePrice) || 0);
@@ -227,7 +276,7 @@ export function App() {
   const [loadError, setLoadError] = useState("");
   const [view, setView] = useState<View>("dashboard");
   const [selectedId, setSelectedId] = useState("");
-  const [documentBackView, setDocumentBackView] = useState<"documents" | "clients">("documents");
+  const [documentBackView, setDocumentBackView] = useState<"documents" | "clients" | "archives">("documents");
   const [query, setQuery] = useState("");
   const [clientQuery, setClientQuery] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -241,6 +290,12 @@ export function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
+  const [superadminWorkspaces, setSuperadminWorkspaces] = useState<SuperadminWorkspace[]>([]);
+  const [selectedSuperadminOrganizationId, setSelectedSuperadminOrganizationId] = useState("");
+  const [superadminBusy, setSuperadminBusy] = useState(false);
+  const [superadminError, setSuperadminError] = useState("");
+  const [archiveYearSelection, setArchiveYearSelection] = useState(new Date().getFullYear() - 1);
+  const [selectedArchiveYear, setSelectedArchiveYear] = useState<number | null>(null);
   const [teamBusy, setTeamBusy] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("editor");
@@ -492,19 +547,32 @@ export function App() {
       .toLowerCase();
   }
 
+  const activeDocuments = useMemo(() => data.documents.filter((doc) => !isArchived(doc)), [data.documents]);
+  const activeExpenses = useMemo(() => data.expenses.filter((expense) => !isArchived(expense)), [data.expenses]);
+  const activePurchaseInvoices = useMemo(() => data.purchaseInvoices.filter((invoice) => !isArchived(invoice)), [data.purchaseInvoices]);
+  const activePurchaseOrders = useMemo(() => data.purchaseOrders.filter((order) => !isArchived(order)), [data.purchaseOrders]);
+  const archivedYears = useMemo(() => [...new Set(archiveYears(data))], [data]);
+  const archivePreviewData = useMemo(
+    () => (selectedArchiveYear ? dataForArchiveYear(data, selectedArchiveYear) : null),
+    [data, selectedArchiveYear]
+  );
+  const selectedSuperadminWorkspace = useMemo(
+    () => superadminWorkspaces.find((entry) => entry.organizationId === selectedSuperadminOrganizationId) || null,
+    [selectedSuperadminOrganizationId, superadminWorkspaces]
+  );
   const sortedClients = useMemo(() => [...data.clients].sort((a, b) => clientLabel(a).localeCompare(clientLabel(b), "fr")), [data.clients]);
   const sortedDocuments = useMemo(
     () =>
-      [...data.documents].sort((a, b) => {
+      [...activeDocuments].sort((a, b) => {
         const clientA = clientLabel(data.clients.find((client) => client.id === a.clientId));
         const clientB = clientLabel(data.clients.find((client) => client.id === b.clientId));
         return clientA.localeCompare(clientB, "fr") || b.updatedAt.localeCompare(a.updatedAt) || b.number.localeCompare(a.number);
       }),
-    [data.clients, data.documents]
+    [activeDocuments, data.clients]
   );
   const recentDocuments = useMemo(
-    () => [...data.documents].sort((a, b) => activityDate(b).localeCompare(activityDate(a)) || b.number.localeCompare(a.number)),
-    [data.documents]
+    () => [...activeDocuments].sort((a, b) => activityDate(b).localeCompare(activityDate(a)) || b.number.localeCompare(a.number)),
+    [activeDocuments]
   );
   const filteredClients = useMemo(() => {
     const terms = normalizeSearch(clientQuery).split(/\s+/).filter(Boolean);
@@ -525,23 +593,24 @@ export function App() {
     () => sortedDocuments.filter((doc) => doc.clientId === selectedClientId),
     [selectedClientId, sortedDocuments]
   );
-  const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin";
-  const canManageCompany = !workspace || workspace.role === "owner" || workspace.role === "admin";
+  const canSuperadmin = workspace?.role === "superadmin";
+  const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin" || canSuperadmin;
+  const canManageCompany = !workspace || workspace.role === "owner" || workspace.role === "admin" || canSuperadmin;
   const canManageCatalog = canManageCompany;
-  const canEditOperations = !workspace || workspace.role === "owner" || workspace.role === "admin" || workspace.role === "editor";
+  const canEditOperations = !workspace || workspace.role === "owner" || workspace.role === "admin" || workspace.role === "editor" || canSuperadmin;
   const canViewCompanySettings = canManageCompany || workspace?.role === "editor";
-  const canDeleteClients = !workspace || workspace.role === "owner" || workspace.role === "admin";
+  const canDeleteClients = !workspace || workspace.role === "owner" || workspace.role === "admin" || canSuperadmin;
 
   function isLockedBillingDocument(doc?: BusinessDocument | null) {
     return doc?.type === "invoice" || doc?.type === "creditNote" || doc?.type === "returnInvoice";
   }
 
   function canModifyDocument(doc?: BusinessDocument | null) {
-    return Boolean(canEditOperations && doc && !isLockedBillingDocument(doc));
+    return Boolean(canEditOperations && doc && !isArchived(doc) && !isLockedBillingDocument(doc));
   }
 
   function canConvertDocument(doc: BusinessDocument, type: DocumentType) {
-    if (!canEditOperations || doc.type === type) return false;
+    if (!canEditOperations || isArchived(doc) || doc.type === type) return false;
     if (doc.type === "quote") return type === "order";
     if (doc.type === "order") return type === "invoice";
     if (doc.type === "invoice") {
@@ -599,7 +668,8 @@ export function App() {
   useEffect(() => {
     if (view === "catalog" && !canManageCatalog) setView("documents");
     if (view === "company" && !canViewCompanySettings) setView("settings");
-  }, [canManageCatalog, canViewCompanySettings, view]);
+    if (view === "superadmin" && !canSuperadmin) setView("dashboard");
+  }, [canManageCatalog, canSuperadmin, canViewCompanySettings, view]);
 
   async function refreshTeam() {
     if (!workspace) {
@@ -628,6 +698,79 @@ export function App() {
     if (view !== "settings" || !workspace) return;
     void refreshTeam();
   }, [view, workspace?.organizationId, workspace?.role]);
+
+  async function refreshSuperadminWorkspaces() {
+    if (!canSuperadmin) {
+      setSuperadminWorkspaces([]);
+      setSelectedSuperadminOrganizationId("");
+      return;
+    }
+    setSuperadminBusy(true);
+    setSuperadminError("");
+    try {
+      const workspaces = await listSuperadminWorkspaces();
+      setSuperadminWorkspaces(workspaces);
+      setSelectedSuperadminOrganizationId((current) =>
+        current && workspaces.some((entry) => entry.organizationId === current) ? current : workspaces[0]?.organizationId || ""
+      );
+    } catch (error) {
+      console.error("Superadmin indisponible", error);
+      setSuperadminError(error instanceof Error ? error.message : "Accès superadmin indisponible");
+    } finally {
+      setSuperadminBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (view !== "superadmin" || !canSuperadmin) return;
+    void refreshSuperadminWorkspaces();
+  }, [canSuperadmin, view]);
+
+  async function deleteSuperadminWorkspace(target: SuperadminWorkspace) {
+    if (!canSuperadmin || superadminBusy) {
+      showPermissionNotice("Accès superadmin requis.");
+      return;
+    }
+    const expected = `SUPPRIMER ${target.organizationName}`;
+    const currentWorkspaceDeleted = workspace?.organizationId === target.organizationId;
+    if (
+      !confirmDestructiveAction(
+        `Supprimer définitivement l'entreprise « ${target.organizationName} » ? Tous ses documents, comptes, achats et accès seront supprimés.`
+      )
+    ) {
+      return;
+    }
+    const typed = window.prompt(`Dernière vérification : tapez exactement « ${expected} » pour confirmer.`);
+    if (typed !== expected) {
+      const message = "Suppression annulée : confirmation incorrecte.";
+      setSuperadminError(message);
+      showPermissionNotice(message);
+      return;
+    }
+
+    setSuperadminBusy(true);
+    setSuperadminError("");
+    try {
+      await deleteSuperadminOrganization(target.organizationId);
+      setNotice(`Entreprise « ${target.organizationName} » supprimée`);
+      if (currentWorkspaceDeleted) {
+        const remote = await loadRemoteWorkspace();
+        setWorkspace(remote.context);
+        setData(normalizeData(remote.data));
+        setSelectedSuperadminOrganizationId("");
+        setView("dashboard");
+      } else {
+        await refreshSuperadminWorkspaces();
+      }
+    } catch (error) {
+      console.error("Suppression superadmin impossible", error);
+      setSuperadminError(error instanceof Error ? error.message : "Suppression impossible");
+      setNotice(userFacingError(error, "Suppression impossible"));
+    } finally {
+      setSuperadminBusy(false);
+      window.setTimeout(() => setNotice(""), 1800);
+    }
+  }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -826,7 +969,7 @@ export function App() {
     return <main className="loading">Chargement de Devix...</main>;
   }
 
-  function openDocument(id: string, from: "documents" | "clients" = "documents") {
+  function openDocument(id: string, from: "documents" | "clients" | "archives" = "documents") {
     setSelectedId(id);
     setDocumentBackView(from);
     setView("documentDetail");
@@ -843,6 +986,8 @@ export function App() {
     if (view === "suppliers") return "Fournisseurs";
     if (view === "clients") return "Dossiers clients";
     if (view === "company") return "Informations société";
+    if (view === "archives") return "Archives annuelles";
+    if (view === "superadmin") return "Superadmin";
     return "Paramètres";
   }
 
@@ -855,7 +1000,7 @@ export function App() {
       return terms.every((term) => searchableText(doc, client).includes(term));
     });
 
-  const dashboardTotals = data.documents.reduce(
+  const dashboardTotals = activeDocuments.reduce(
     (acc, doc) => {
       const value = totals(doc.lines).totalTtc;
       const paidAmount = doc.type === "invoice" ? paymentSummary(doc, value).paidAmount : 0;
@@ -867,18 +1012,18 @@ export function App() {
     },
     { quotes: 0, orders: 0, invoices: 0, paid: 0 }
   );
-  const statusCounts = data.documents.reduce<Record<DocumentStatus, number>>(
+  const statusCounts = activeDocuments.reduce<Record<DocumentStatus, number>>(
     (acc, doc) => ({ ...acc, [doc.status]: acc[doc.status] + 1 }),
     { draft: 0, partial: 0, paid: 0 }
   );
-  const pendingValue = data.documents
-    .filter((doc) => doc.status !== "paid")
+  const pendingValue = activeDocuments
+    .filter((doc) => doc.type === "invoice" && doc.status !== "paid")
     .reduce((sum, doc) => {
       const value = totals(doc.lines).totalTtc;
-      return sum + (doc.type === "invoice" ? paymentSummary(doc, value).remainingAmount : value);
+      return sum + paymentSummary(doc, value).remainingAmount;
     }, 0);
-  const dueDocuments = data.documents
-    .filter((doc) => doc.dueDate && doc.status !== "paid")
+  const dueDocuments = activeDocuments
+    .filter((doc) => doc.type === "invoice" && doc.dueDate && doc.status !== "paid")
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 5);
 
@@ -1421,6 +1566,65 @@ export function App() {
     }
   }
 
+  async function archiveYear(year: number) {
+    if (!canManageCompany) {
+      showPermissionNotice("L’archivage annuel est réservé aux administrateurs.");
+      return false;
+    }
+    const currentYearValue = new Date().getFullYear();
+    if (!Number.isFinite(year) || year >= currentYearValue) {
+      showPermissionNotice("Seule une année terminée peut être archivée.");
+      return false;
+    }
+
+    const documents = data.documents.filter((doc) => !isArchived(doc) && documentYear(doc) === year);
+    const expenses = data.expenses.filter((expense) => !isArchived(expense) && expenseYear(expense) === year);
+    const invoices = data.purchaseInvoices.filter((invoice) => !isArchived(invoice) && purchaseInvoiceYear(invoice) === year);
+    const orders = data.purchaseOrders.filter((order) => !isArchived(order) && purchaseOrderYear(order) === year);
+    const totalItems = documents.length + expenses.length + invoices.length + orders.length;
+    if (!totalItems) {
+      showPermissionNotice(`Aucun élément actif trouvé pour ${year}.`);
+      return false;
+    }
+
+    if (
+      !confirmDestructiveAction(
+        `Archiver ${totalItems} élément(s) de ${year} ? Ils disparaîtront des vues actives, mais resteront consultables dans Archives et dans les comptes.`
+      )
+    ) {
+      return false;
+    }
+
+    const expected = `ARCHIVER ${year}`;
+    const typed = window.prompt(`Dernière vérification : tapez exactement « ${expected} » pour confirmer.`);
+    if (typed !== expected) {
+      showPermissionNotice("Archivage annulé : confirmation incorrecte.");
+      return false;
+    }
+
+    const archivedAt = new Date().toISOString();
+    const next = normalizeData({
+      ...data,
+      documents: data.documents.map((doc) =>
+        !isArchived(doc) && documentYear(doc) === year ? { ...doc, archivedYear: year, archivedAt, updatedAt: archivedAt } : doc
+      ),
+      expenses: data.expenses.map((expense) =>
+        !isArchived(expense) && expenseYear(expense) === year ? { ...expense, archivedYear: year, archivedAt, updatedAt: archivedAt } : expense
+      ),
+      purchaseInvoices: data.purchaseInvoices.map((invoice) =>
+        !isArchived(invoice) && purchaseInvoiceYear(invoice) === year
+          ? { ...invoice, archivedYear: year, archivedAt, updatedAt: archivedAt }
+          : invoice
+      ),
+      purchaseOrders: data.purchaseOrders.map((order) =>
+        !isArchived(order) && purchaseOrderYear(order) === year ? { ...order, archivedYear: year, archivedAt, updatedAt: archivedAt } : order
+      ),
+    });
+    const saved = await persist(next, `Année ${year} archivée`);
+    if (saved) setSelectedArchiveYear(year);
+    return saved;
+  }
+
   async function createExpense(expense: BusinessExpense) {
     if (!canEditOperations) {
       showPermissionNotice("Votre accès est en lecture seule.");
@@ -1537,12 +1741,12 @@ export function App() {
         subject: `Bon de commande ${sent.number} - ${data.company.name || "Devix"}`,
         body: `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${sent.number}.\n\nCordialement,\n${data.company.name || ""}`,
       });
-      setNotice(result.opened && !result.fallback ? "Email prêt avec le bon de commande joint" : "Brouillon email préparé");
+      setNotice(result.opened && !result.fallback ? "Email prêt avec le bon de commande joint" : "Email préparé");
       window.setTimeout(() => setNotice(""), 2200);
       return result.opened;
     } catch (error) {
       console.error("Envoi du bon de commande impossible", error);
-      setNotice("Impossible d’ouvrir le brouillon email");
+      setNotice("Impossible d’ouvrir l’email préparé");
       window.setTimeout(() => setNotice(""), 2200);
       return false;
     }
@@ -1711,7 +1915,7 @@ export function App() {
     const purchaseInvoices = exists
       ? data.purchaseInvoices.map((entry) => (entry.id === invoice.id ? normalized : entry))
       : [normalized, ...data.purchaseInvoices];
-    return persist({ ...data, purchaseInvoices }, exists ? "Brouillon mis à jour" : "Facture d’achat créée");
+    return persist({ ...data, purchaseInvoices }, exists ? "Facture d’achat mise à jour" : "Facture d’achat créée");
   }
 
   async function postPurchaseInvoice(invoice: PurchaseInvoice) {
@@ -1943,9 +2147,6 @@ export function App() {
           >
             <Users size={18} /> Clients
           </button>
-          <button className={view === "accounting" ? "active" : ""} onClick={() => setView("accounting")}>
-            <BookOpenCheck size={18} /> Comptes
-          </button>
           <button className={view === "purchases" ? "active" : ""} onClick={() => setView("purchases")}>
             <ShoppingCart size={18} /> Achats
           </button>
@@ -1955,6 +2156,22 @@ export function App() {
           {canManageCatalog && (
             <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>
               <PackageCheck size={18} /> Catalogue
+            </button>
+          )}
+          <button className={view === "accounting" ? "active" : ""} onClick={() => setView("accounting")}>
+            <BookOpenCheck size={18} /> Comptes
+          </button>
+          {canManageCompany && (
+            <button
+              className={view === "archives" || (view === "documentDetail" && documentBackView === "archives") ? "active" : ""}
+              onClick={() => setView("archives")}
+            >
+              <Archive size={18} /> Archives
+            </button>
+          )}
+          {canSuperadmin && (
+            <button className={view === "superadmin" ? "active" : ""} onClick={() => setView("superadmin")}>
+              <ShieldCheck size={18} /> Superadmin
             </button>
           )}
           {canViewCompanySettings && (
@@ -2096,10 +2313,38 @@ export function App() {
           />
         )}
 
+        {view === "archives" && (
+          <ArchivesView
+            data={data}
+            clients={data.clients}
+            years={archivedYears}
+            selectedYear={selectedArchiveYear}
+            archiveYearSelection={archiveYearSelection}
+            previewData={archivePreviewData}
+            canArchive={canManageCompany}
+            onYearSelectionChange={setArchiveYearSelection}
+            onSelectYear={setSelectedArchiveYear}
+            onArchiveYear={archiveYear}
+            onOpenDocument={(id) => openDocument(id, "archives")}
+          />
+        )}
+
+        {view === "superadmin" && (
+          <SuperadminView
+            workspaces={superadminWorkspaces}
+            selectedWorkspace={selectedSuperadminWorkspace}
+            busy={superadminBusy}
+            error={superadminError}
+            onSelect={setSelectedSuperadminOrganizationId}
+            onRefresh={refreshSuperadminWorkspaces}
+            onDelete={deleteSuperadminWorkspace}
+          />
+        )}
+
         {view === "purchases" && (
           <PurchasesView
-            orders={data.purchaseOrders}
-            invoices={data.purchaseInvoices}
+            orders={activePurchaseOrders}
+            invoices={activePurchaseInvoices}
             suppliers={data.suppliers}
             catalog={data.catalog}
             defaultVatRate={data.company.defaultVatRate}
@@ -2126,7 +2371,7 @@ export function App() {
           <SuppliersView
             suppliers={data.suppliers}
             catalog={data.catalog}
-            expenses={data.expenses}
+            expenses={activeExpenses}
             readOnly={!canEditOperations}
             onSave={saveSupplier}
             onDelete={deleteSupplier}
@@ -2183,9 +2428,9 @@ export function App() {
             {!filteredDocuments.length && (
               <div className="emptyState">
                 <FileText size={42} />
-                <h2>{data.documents.length ? "Aucun résultat" : "Aucun document"}</h2>
+                <h2>{activeDocuments.length ? "Aucun résultat" : "Aucun document"}</h2>
                 <p>
-                  {data.documents.length
+                  {activeDocuments.length
                     ? "Aucun devis, bon de commande ou facture ne correspond à cette recherche."
                     : "Créez un premier devis pour démarrer le flux devis, bon de commande, facture."}
                 </p>
@@ -2209,7 +2454,8 @@ export function App() {
                   setView(documentBackView);
                 }}
               >
-                <ArrowLeft size={17} /> {documentBackView === "clients" ? "Retour au client" : "Retour aux documents"}
+                <ArrowLeft size={17} />{" "}
+                {documentBackView === "clients" ? "Retour au client" : documentBackView === "archives" ? "Retour aux archives" : "Retour aux documents"}
               </button>
             </div>
             {selectedDoc ? (
@@ -2218,8 +2464,8 @@ export function App() {
                 clients={sortedClients}
                 catalog={sortedCatalog}
                 readOnly={!canModifyDocument(selectedDoc)}
-                canEditPayments={canEditOperations && selectedDoc.type === "invoice"}
-                canRestorePrevious={canEditOperations}
+                canEditPayments={canEditOperations && selectedDoc.type === "invoice" && !isArchived(selectedDoc)}
+                canRestorePrevious={canEditOperations && !isArchived(selectedDoc)}
                 canCreateCreditNote={canConvertDocument(selectedDoc, "creditNote")}
                 canCreateReturnInvoice={canConvertDocument(selectedDoc, "returnInvoice")}
                 onChange={updateDocument}
@@ -2288,7 +2534,7 @@ export function App() {
             <div className="clientsLayout">
               <div className="clientList">
                 {filteredClients.map((client) => {
-                  const docs = data.documents.filter((doc) => doc.clientId === client.id);
+                  const docs = activeDocuments.filter((doc) => doc.clientId === client.id);
                   const pending = docs.reduce((sum, doc) => {
                     const value = totals(doc.lines).totalTtc;
                     return sum + (doc.type === "invoice" ? paymentSummary(doc, value).remainingAmount : 0);
@@ -2944,6 +3190,319 @@ function DueRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; clients:
         </button>
       ))}
     </div>
+  );
+}
+
+function periodForYear(year: number): AccountingPeriod {
+  return { startDate: `${year}-01-01`, endDate: `${year}-12-31` };
+}
+
+function ArchivesView({
+  data,
+  clients,
+  years,
+  selectedYear,
+  archiveYearSelection,
+  previewData,
+  canArchive,
+  onYearSelectionChange,
+  onSelectYear,
+  onArchiveYear,
+  onOpenDocument,
+}: {
+  data: AppData;
+  clients: Client[];
+  years: number[];
+  selectedYear: number | null;
+  archiveYearSelection: number;
+  previewData: AppData | null;
+  canArchive: boolean;
+  onYearSelectionChange: (year: number) => void;
+  onSelectYear: (year: number | null) => void;
+  onArchiveYear: (year: number) => Promise<boolean>;
+  onOpenDocument: (id: string) => void;
+}) {
+  const currentYearValue = new Date().getFullYear();
+  const selectableYears = [
+    ...data.documents.filter((doc) => !isArchived(doc)).map(documentYear),
+    ...data.expenses.filter((expense) => !isArchived(expense)).map(expenseYear),
+    ...data.purchaseInvoices.filter((invoice) => !isArchived(invoice)).map(purchaseInvoiceYear),
+    ...data.purchaseOrders.filter((order) => !isArchived(order)).map(purchaseOrderYear),
+  ]
+    .filter((year): year is number => Number.isFinite(year) && year < currentYearValue)
+    .filter((year, index, allYears) => allYears.indexOf(year) === index)
+    .sort((a, b) => b - a);
+  const selectedArchiveCandidate = selectableYears.includes(archiveYearSelection) ? archiveYearSelection : selectableYears[0];
+  const activeForSelection =
+    selectedArchiveCandidate === undefined
+      ? 0
+      : data.documents.filter((doc) => !isArchived(doc) && documentYear(doc) === selectedArchiveCandidate).length +
+        data.expenses.filter((expense) => !isArchived(expense) && expenseYear(expense) === selectedArchiveCandidate).length +
+        data.purchaseInvoices.filter((invoice) => !isArchived(invoice) && purchaseInvoiceYear(invoice) === selectedArchiveCandidate).length +
+        data.purchaseOrders.filter((order) => !isArchived(order) && purchaseOrderYear(order) === selectedArchiveCandidate).length;
+  const archiveReport = previewData && selectedYear ? buildAccountingReport(previewData, periodForYear(selectedYear)) : null;
+
+  return (
+    <section className="archivePage">
+      <section className="panel archiveActionPanel">
+        <div className="panelTitle">
+          <div>
+            <span className="eyebrow">Clôture annuelle</span>
+            <h2>Archiver une année terminée</h2>
+          </div>
+          <div className="panelActions">
+            <select
+              value={selectedArchiveCandidate ?? ""}
+              disabled={!selectableYears.length}
+              onChange={(event) => onYearSelectionChange(Number(event.target.value))}
+            >
+              {selectableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={!canArchive || selectedArchiveCandidate === undefined || activeForSelection === 0}
+              onClick={() => selectedArchiveCandidate !== undefined && void onArchiveYear(selectedArchiveCandidate)}
+            >
+              <Archive size={17} /> {selectedArchiveCandidate === undefined ? "Aucune année à archiver" : `Archiver ${selectedArchiveCandidate}`}
+            </button>
+          </div>
+        </div>
+        <p>
+          {activeForSelection} élément(s) actif(s) seront retirés des vues courantes. Ils resteront consultables ici, documents et livre de
+          comptes compris.
+        </p>
+      </section>
+
+      <section className="archiveLayout">
+        <aside className="panel archiveYearList">
+          <div className="panelTitle">
+            <h2>Années archivées</h2>
+          </div>
+          {years.length ? (
+            years.map((year) => (
+              <button key={year} className={selectedYear === year ? "archiveYearCard selected" : "archiveYearCard"} onClick={() => onSelectYear(year)}>
+                <strong>{year}</strong>
+                <span>{data.documents.filter((doc) => doc.archivedYear === year).length} document(s)</span>
+              </button>
+            ))
+          ) : (
+            <div className="emptyRows compactEmpty">Aucune année archivée.</div>
+          )}
+        </aside>
+
+        <section className="panel archiveDetail">
+          {previewData && selectedYear && archiveReport ? (
+            <>
+              <div className="panelTitle">
+                <div>
+                  <span className="eyebrow">Archive {selectedYear}</span>
+                  <h2>Documents et comptes</h2>
+                </div>
+              </div>
+              <div className="archiveKpis">
+                <div>
+                  <span>Documents</span>
+                  <strong>{previewData.documents.length}</strong>
+                </div>
+                <div>
+                  <span>CA HT</span>
+                  <strong>{currency(archiveReport.revenueHt)}</strong>
+                </div>
+                <div>
+                  <span>Charges HT</span>
+                  <strong>{currency(archiveReport.operatingExpensesHt)}</strong>
+                </div>
+                <div>
+                  <span>Résultat</span>
+                  <strong>{currency(archiveReport.netProfit)}</strong>
+                </div>
+              </div>
+              <div className="archiveDocumentGrid">
+                {previewData.documents.map((doc) => {
+                  const client = clients.find((entry) => entry.id === doc.clientId);
+                  return (
+                    <button key={doc.id} className="docCard archiveDocCard" onClick={() => onOpenDocument(doc.id)}>
+                      <span>
+                        {labels[doc.type]} <strong>{doc.number}</strong>
+                      </span>
+                      <b>{doc.projectName || "Sans nom"}</b>
+                      <small>{clientLabel(client)}</small>
+                      <div className="docCardFooter">
+                        <StatusBadge status={doc.status} />
+                        <em>{currency(totals(doc.lines).totalTtc)}</em>
+                      </div>
+                    </button>
+                  );
+                })}
+                {!previewData.documents.length && <div className="emptyRows">Aucun document commercial archivé pour cette année.</div>}
+              </div>
+            </>
+          ) : (
+            <div className="emptyState">
+              <Archive size={42} />
+              <h2>Sélectionnez une année</h2>
+              <p>Les documents archivés et la synthèse comptable de l’année apparaîtront ici.</p>
+            </div>
+          )}
+        </section>
+      </section>
+    </section>
+  );
+}
+
+function SuperadminView({
+  workspaces,
+  selectedWorkspace,
+  busy,
+  error,
+  onSelect,
+  onRefresh,
+  onDelete,
+}: {
+  workspaces: SuperadminWorkspace[];
+  selectedWorkspace: SuperadminWorkspace | null;
+  busy: boolean;
+  error: string;
+  onSelect: (organizationId: string) => void;
+  onRefresh: () => Promise<void>;
+  onDelete: (workspace: SuperadminWorkspace) => Promise<void>;
+}) {
+  const selectedData = selectedWorkspace?.data;
+  const year = new Date().getFullYear();
+  const report = selectedData ? buildAccountingReport(selectedData, periodForYear(year)) : null;
+
+  return (
+    <section className="superadminPage">
+      <aside className="panel superadminList">
+        <div className="panelTitle">
+          <div>
+            <span className="eyebrow">Superadmin</span>
+            <h2>Comptes</h2>
+          </div>
+          <button className="ghost" disabled={busy} onClick={() => void onRefresh()}>
+            {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Search size={17} />} Actualiser
+          </button>
+        </div>
+        {error && <span className="authMessage">{error}</span>}
+        <div className="superadminCards">
+          {workspaces.map((workspace) => (
+            <button
+              key={workspace.organizationId}
+              className={selectedWorkspace?.organizationId === workspace.organizationId ? "superadminCard selected" : "superadminCard"}
+              onClick={() => onSelect(workspace.organizationId)}
+            >
+              <Building2 size={20} />
+              <span>
+                <strong>{workspace.organizationName}</strong>
+                <small>{workspace.data.company.email || workspace.organizationId}</small>
+              </span>
+              <b>{workspace.data.documents.length} doc.</b>
+            </button>
+          ))}
+          {!workspaces.length && !busy && <div className="emptyRows">Aucun compte disponible.</div>}
+        </div>
+      </aside>
+
+      <section className="panel superadminDetail">
+        {selectedWorkspace && selectedData && report ? (
+          <>
+            <div className="panelTitle">
+              <div>
+                <span className="eyebrow">Lecture seule</span>
+                <h2>{selectedWorkspace.organizationName}</h2>
+              </div>
+              <div className="panelActions">
+                <span className="workspaceBadge">
+                  Mis à jour {selectedWorkspace.updatedAt ? formatShortDate(selectedWorkspace.updatedAt) : "inconnu"}
+                </span>
+                <button className="danger" disabled={busy} onClick={() => void onDelete(selectedWorkspace)}>
+                  <Trash2 size={17} /> Supprimer
+                </button>
+              </div>
+            </div>
+            <div className="archiveKpis">
+              <div>
+                <span>Documents</span>
+                <strong>{selectedData.documents.length}</strong>
+              </div>
+              <div>
+                <span>Clients</span>
+                <strong>{selectedData.clients.length}</strong>
+              </div>
+              <div>
+                <span>CA HT {year}</span>
+                <strong>{currency(report.revenueHt)}</strong>
+              </div>
+              <div>
+                <span>Solde TVA {year}</span>
+                <strong>{currency(report.vatBalance)}</strong>
+              </div>
+            </div>
+            <div className="superadminSections">
+              <section>
+                <h3>Devis, BC, factures</h3>
+                <div className="archiveDocumentGrid">
+                  {selectedData.documents.slice(0, 24).map((doc) => (
+                    <article key={doc.id} className="docCard archiveDocCard">
+                      <span>
+                        {labels[doc.type]} <strong>{doc.number}</strong>
+                      </span>
+                      <b>{doc.projectName || "Sans nom"}</b>
+                      <small>{clientLabel(selectedData.clients.find((client) => client.id === doc.clientId))}</small>
+                      <div className="docCardFooter">
+                        <StatusBadge status={doc.status} />
+                        <em>{currency(totals(doc.lines).totalTtc)}</em>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>Livre des comptes {year}</h3>
+                <div className="accountingTableWrap superadminAccountingTable">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Mois</th>
+                        <th>CA HT</th>
+                        <th>Charges</th>
+                        <th>Résultat</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.months.map((month) => (
+                        <tr key={month.key}>
+                          <td>{month.label}</td>
+                          <td>{currency(month.revenueHt)}</td>
+                          <td>{currency(month.operatingExpensesHt)}</td>
+                          <td>{currency(month.netProfit)}</td>
+                        </tr>
+                      ))}
+                      {!report.months.length && (
+                        <tr>
+                          <td colSpan={4} className="accountingEmpty">
+                            Aucune écriture sur l’année.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </>
+        ) : (
+          <div className="emptyState">
+            <ShieldCheck size={42} />
+            <h2>Sélectionnez un compte</h2>
+            <p>Les documents, bons de commande, factures et comptes s’afficheront ici.</p>
+          </div>
+        )}
+      </section>
+    </section>
   );
 }
 
