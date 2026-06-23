@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+electron/
+scripts/
+supabase/
+auth-callback/
+
+*.log
+*.exe
+*.blockmap
+
+.env
+.env.local
+.env.*.local
