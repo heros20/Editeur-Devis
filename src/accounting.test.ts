@@ -281,8 +281,21 @@ describe("accounting report", () => {
     expect(renderAccountingHtml(report, data.company)).toContain("Résultat final estimé");
     expect(renderAccountingHtml(report, data.company)).toContain("Résultat avant TVA et impôts");
     expect(renderAccountingHtml(report, data.company)).toContain("Net final estimé après TVA et impôts");
+    expect(renderAccountingHtml(report, data.company)).toContain("Résultat estimatif à valider avec votre comptable");
     expect(renderAccountingHtml(report, data.company)).toContain("Synthèse TVA");
     expect(renderAccountingHtml(report, data.company)).toContain("TVA collectée");
     expect(renderAccountingHtml(report, data.company)).toContain("TVA déductible");
+  });
+
+  it("can keep VAT outside the final net estimate", () => {
+    const data = createDefaultAppData();
+    data.company.includeVatInNetEstimate = false;
+    data.documents = [document()];
+    const report = buildAccountingReport(data, annualPeriod(2026));
+    const html = renderAccountingHtml(report, data.company);
+
+    expect(html).toContain("Résultat avant impôts (TVA non déduite)");
+    expect(html).toContain("Net final estimé après impôts");
+    expect(html).toContain("ne déduit pas le solde TVA");
   });
 });

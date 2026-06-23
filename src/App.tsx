@@ -5459,6 +5459,7 @@ function CompanySettingsEditor({
   onSave: (company: CompanySettings) => Promise<boolean>;
 }) {
   const [identityDraft, setIdentityDraft] = useState(company);
+  const [includeVatInNetEstimateDraft, setIncludeVatInNetEstimateDraft] = useState(company.includeVatInNetEstimate);
   const [paymentTermsDraft, setPaymentTermsDraft] = useState(company.paymentTerms);
   const [notesDraft, setNotesDraft] = useState(company.notes);
   const [savingBlock, setSavingBlock] = useState<string | null>(null);
@@ -5468,6 +5469,7 @@ function CompanySettingsEditor({
   const identitySignature = companyIdentityFields.map(([key]) => String(company[key] ?? "")).join("\u0000");
 
   useEffect(() => setIdentityDraft(company), [identitySignature]);
+  useEffect(() => setIncludeVatInNetEstimateDraft(company.includeVatInNetEstimate), [company.includeVatInNetEstimate]);
   useEffect(() => setPaymentTermsDraft(company.paymentTerms), [company.paymentTerms]);
   useEffect(() => setNotesDraft(company.notes), [company.notes]);
 
@@ -5516,6 +5518,45 @@ function CompanySettingsEditor({
             >
               {savedBlock === "identity" ? <Check size={17} /> : <Save size={17} />}
               {savingBlock === "identity" ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="companySettingsBlock accountingSettingsBlock">
+        <div className="companySettingsBlockTitle">
+          <div>
+            <strong>Comptabilité</strong>
+            <span>Réglage simple utilisé dans le PDF du livre des comptes.</span>
+          </div>
+        </div>
+        <label className="settingsToggle">
+          <input
+            type="checkbox"
+            disabled={readOnly}
+            checked={includeVatInNetEstimateDraft}
+            onChange={(event) => setIncludeVatInNetEstimateDraft(event.target.checked)}
+          />
+          <span>
+            <strong>Déduire la TVA du net final estimé</strong>
+            <small>Activé : lecture trésorerie. Désactivé : résultat après impôt, TVA suivie séparément.</small>
+          </span>
+        </label>
+        {!readOnly && (
+          <div className="settingsSaveAction">
+            {savedBlock === "accounting" && (
+              <span className="inlineSaveConfirmation">
+                <Check size={16} /> Enregistré
+              </span>
+            )}
+            <button
+              type="button"
+              className={savedBlock === "accounting" ? "saveButton saved" : "saveButton"}
+              disabled={savingBlock !== null || savedBlock !== null}
+              onClick={() => void saveBlock("accounting", { ...company, includeVatInNetEstimate: includeVatInNetEstimateDraft })}
+            >
+              {savedBlock === "accounting" ? <Check size={17} /> : <Save size={17} />}
+              {savingBlock === "accounting" ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         )}

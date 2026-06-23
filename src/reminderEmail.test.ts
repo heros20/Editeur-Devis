@@ -78,6 +78,7 @@ const company = (partial: Partial<CompanySettings>): CompanySettings => ({
   quoteValidityDays: 30,
   defaultVatRate: 20,
   defaultDepositRate: 30,
+  includeVatInNetEstimate: true,
   notes: "",
   ...partial,
 });

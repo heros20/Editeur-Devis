@@ -3869,6 +3869,50 @@ textarea {
   background: white;
 }
 
+.companySettingsBlockTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.companySettingsBlockTitle div,
+.settingsToggle span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.companySettingsBlockTitle strong,
+.settingsToggle strong {
+  color: var(--theme-text);
+}
+
+.companySettingsBlockTitle span,
+.settingsToggle small {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.settingsToggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-surface);
+}
+
+.settingsToggle input {
+  width: 18px;
+  min-height: 18px;
+  margin-top: 2px;
+}
+
 .companySettingsBlock .fullLabel {
   margin-top: 0;
 }

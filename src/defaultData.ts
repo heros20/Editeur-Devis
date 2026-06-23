@@ -42,6 +42,7 @@ export const defaultCompany: CompanySettings = {
   quoteValidityDays: 30,
   defaultVatRate: 20,
   defaultDepositRate: 30,
+  includeVatInNetEstimate: true,
   notes: "",
 };
 
@@ -483,6 +484,10 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
     ...fallback.company,
     ...(input?.company ?? {}),
     themeId: isThemeId(input?.company?.themeId) ? input.company.themeId : fallback.company.themeId,
+    includeVatInNetEstimate:
+      typeof input?.company?.includeVatInNetEstimate === "boolean"
+        ? input.company.includeVatInNetEstimate
+        : fallback.company.includeVatInNetEstimate,
   };
   const suppliers = Array.isArray(input?.suppliers) ? input.suppliers.map(normalizeSupplier) : fallback.suppliers;
   const catalog = (Array.isArray(input?.catalog) ? input.catalog.map(normalizeCatalogItem) : fallback.catalog).map((item) => {

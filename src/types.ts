@@ -23,6 +23,7 @@ export interface CompanySettings {
   quoteValidityDays: number;
   defaultVatRate: number;
   defaultDepositRate: number;
+  includeVatInNetEstimate: boolean;
   notes: string;
 }
 
