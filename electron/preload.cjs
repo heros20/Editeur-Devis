@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("devixApi", {
   saveStore: (data) => ipcRenderer.invoke("store:save", data),
   nextNumber: (type) => ipcRenderer.invoke("store:next-number", type),
   uuid: () => ipcRenderer.invoke("app:uuid"),
+  getDiagnostics: () => ipcRenderer.invoke("app:diagnostics"),
+  openPath: (targetPath) => ipcRenderer.invoke("app:open-path", targetPath),
   savePdf: (payload) => ipcRenderer.invoke("dialog:save-pdf", payload),
   saveExcel: (payload) => ipcRenderer.invoke("dialog:save-excel", payload),
   exportJson: (data) => ipcRenderer.invoke("dialog:export-json", data),

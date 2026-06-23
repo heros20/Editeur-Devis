@@ -3751,6 +3751,69 @@ textarea {
   font-weight: 700;
 }
 
+.diagnosticsSection {
+  display: grid;
+  gap: 16px;
+}
+
+.diagnosticGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.diagnosticGrid > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: white;
+}
+
+.diagnosticGrid span,
+.diagnosticPathRow span {
+  color: var(--theme-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.diagnosticGrid strong,
+.diagnosticPathRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--theme-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnosticPaths {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnosticPathRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: white;
+}
+
+.diagnosticPathRow > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.diagnosticsError {
+  color: #9a2f2f;
+}
+
 .preferencesPanel .accountSection,
 .preferencesPanel .teamSection {
   margin-top: 0;
@@ -3764,11 +3827,24 @@ textarea {
   .themeGrid {
     grid-template-columns: repeat(2, minmax(190px, 1fr));
   }
+
+  .diagnosticGrid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
   .themeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .diagnosticGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnosticPathRow {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
   }
 
   .themeActions {

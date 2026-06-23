@@ -152,6 +152,30 @@ async function pathExists(filePath) {
   }
 }
 
+async function latestMtimeIso(filePath) {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.mtime.toISOString();
+  } catch {
+    return "";
+  }
+}
+
+async function latestBackupAt(root) {
+  if (!root || !(await pathExists(root))) return "";
+  const candidates = [await latestMtimeIso(path.join(root, "latest", "devix-data.json"))].filter(Boolean);
+  const snapshotsDir = path.join(root, "snapshots");
+  if (await pathExists(snapshotsDir)) {
+    const entries = await fs.readdir(snapshotsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        candidates.push(await latestMtimeIso(path.join(snapshotsDir, entry.name, "devix-data.json")));
+      }
+    }
+  }
+  return candidates.filter(Boolean).sort().at(-1) || "";
+}
+
 async function copyDirectoryContents(source, target) {
   if (!(await pathExists(source))) return;
   await fs.rm(target, { recursive: true, force: true });
@@ -518,6 +542,38 @@ ipcMain.handle("store:next-number", async (_event, type) => {
 });
 
 ipcMain.handle("app:uuid", () => crypto.randomUUID());
+
+ipcMain.handle("app:diagnostics", async () => {
+  const userDataPath = app.getPath("userData");
+  const backupRoot = getBackupRoot();
+  const localBackupRoot = path.join(backupRoot, "local");
+  const oneDriveBackupRoot = await getOneDriveBackupRoot();
+  return {
+    version: app.getVersion(),
+    mode: portableDataRoot ? "portable" : isDev ? "development" : "installed",
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    userDataPath,
+    dataPath: getDataPath(),
+    backupRoot,
+    attachmentsRoot: getAttachmentsRoot(),
+    oneDriveBackupRoot,
+    lastLocalBackupAt: await latestBackupAt(localBackupRoot),
+    lastOneDriveBackupAt: await latestBackupAt(oneDriveBackupRoot),
+  };
+});
+
+ipcMain.handle("app:open-path", async (_event, targetPath) => {
+  const resolved = path.resolve(String(targetPath || ""));
+  const userDataRoot = path.resolve(app.getPath("userData"));
+  const oneDriveBackupRoot = await getOneDriveBackupRoot();
+  const allowedRoots = [userDataRoot, oneDriveBackupRoot ? path.resolve(oneDriveBackupRoot) : ""].filter(Boolean);
+  if (!allowedRoots.some((root) => isPathInside(resolved, root))) {
+    return { opened: false, error: "Chemin non autorise." };
+  }
+  const error = await shell.openPath(resolved);
+  return { opened: !error, error: error || undefined };
+});
 
 function mailtoUrl({ to, subject, body }) {
   const params = [

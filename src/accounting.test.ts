@@ -278,5 +278,11 @@ describe("accounting report", () => {
     expect(Object.keys(workbook)).toContain("xl/worksheets/sheet3.xml");
     expect(renderAccountingHtml(report, data.company)).toContain("Livre de comptes");
     expect(renderAccountingHtml(report, data.company)).toContain("FAC-2026-0001");
+    expect(renderAccountingHtml(report, data.company)).toContain("Résultat final estimé");
+    expect(renderAccountingHtml(report, data.company)).toContain("Résultat avant TVA et impôts");
+    expect(renderAccountingHtml(report, data.company)).toContain("Net final estimé après TVA et impôts");
+    expect(renderAccountingHtml(report, data.company)).toContain("Synthèse TVA");
+    expect(renderAccountingHtml(report, data.company)).toContain("TVA collectée");
+    expect(renderAccountingHtml(report, data.company)).toContain("TVA déductible");
   });
 });

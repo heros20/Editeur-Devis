@@ -12,6 +12,7 @@ import {
   ExternalLink,
   FileCheck2,
   FileText,
+  FolderOpen,
   History,
   Home,
   Image as ImageIcon,
@@ -46,7 +47,7 @@ import { buildAccountingXlsx, renderAccountingHtml } from "./accountingExport";
 import { createDefaultAppData, normalizeData } from "./defaultData";
 import { renderCompanyHtml, renderDocumentHtml } from "./pdf";
 import { buildPaymentReminderEmail } from "./reminderEmail";
-import { getDevixApi } from "./runtimeApi";
+import { getDevixApi, type DevixDiagnostics } from "./runtimeApi";
 import { devixThemes, getTheme, themeCssVariables, type ThemeId } from "./themes";
 import {
   completeOAuthRedirect,
@@ -2881,6 +2882,7 @@ export function App() {
 
         {view === "settings" && (
           <section className="settingsPanel preferencesPanel">
+            <DiagnosticsSettings data={data} workspace={workspace} />
             <ThemeSettings
               currentThemeId={data.company.themeId}
               readOnly={!canManageCompany}
@@ -3121,6 +3123,154 @@ function LocalAccountSettings({
         onGoogleAuth={onGoogleAuth}
         onPasswordSetup={onPasswordSetup}
       />
+    </section>
+  );
+}
+
+function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: WorkspaceContext | null }) {
+  const [diagnostics, setDiagnostics] = useState<DevixDiagnostics | null>(null);
+  const [error, setError] = useState("");
+  const [copiedKey, setCopiedKey] = useState("");
+  const [busyPath, setBusyPath] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getDevixApi()
+      .getDiagnostics()
+      .then((value) => {
+        if (!cancelled) setDiagnostics(value);
+      })
+      .catch((loadError) => {
+        console.error("Diagnostic indisponible", loadError);
+        if (!cancelled) setError("Diagnostic indisponible");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function copyValue(key: string, value: string) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey(""), 1500);
+    } catch {
+      setError("Copie impossible");
+    }
+  }
+
+  async function openPath(targetPath: string) {
+    if (!targetPath) return;
+    setBusyPath(targetPath);
+    setError("");
+    try {
+      const result = await getDevixApi().openPath(targetPath);
+      if (!result.opened) setError(result.error || "Ouverture impossible");
+    } catch (openError) {
+      console.error("Ouverture dossier impossible", openError);
+      setError("Ouverture impossible");
+    } finally {
+      setBusyPath("");
+    }
+  }
+
+  const modeLabel = diagnostics
+    ? {
+        browser: "Navigateur",
+        development: "Electron dev",
+        installed: "Installé",
+        portable: "Portable",
+      }[diagnostics.mode]
+    : "Chargement";
+  const sessionLabel = workspace ? `${workspace.organizationName} · ${roleLabels[workspace.role]}` : "Mode local";
+  const lastLocalBackup = diagnostics?.lastLocalBackupAt ? formatShortDate(diagnostics.lastLocalBackupAt) : "Jamais";
+  const oneDriveBackupLabel = diagnostics?.oneDriveBackupRoot
+    ? diagnostics.lastOneDriveBackupAt
+      ? formatShortDate(diagnostics.lastOneDriveBackupAt)
+      : "Jamais"
+    : "Non configuré";
+  const pathRows = diagnostics
+    ? [
+        { key: "userData", label: "Dossier données", value: diagnostics.userDataPath, canOpen: diagnostics.mode !== "browser" },
+        { key: "dataPath", label: "Fichier local", value: diagnostics.dataPath, canOpen: false },
+        { key: "backupRoot", label: "Sauvegardes locales", value: diagnostics.backupRoot, canOpen: diagnostics.mode !== "browser" },
+        { key: "attachmentsRoot", label: "Pièces jointes", value: diagnostics.attachmentsRoot, canOpen: diagnostics.mode !== "browser" },
+        { key: "oneDriveBackupRoot", label: "Sauvegardes OneDrive", value: diagnostics.oneDriveBackupRoot || "Non configuré", canOpen: Boolean(diagnostics.oneDriveBackupRoot) },
+      ]
+    : [];
+
+  return (
+    <section className="preferenceSection diagnosticsSection">
+      <div className="preferenceTitle">
+        <div className="preferenceIcon">
+          <Settings size={20} />
+        </div>
+        <div>
+          <span className="eyebrow">À propos</span>
+          <h2>Version et diagnostic</h2>
+        </div>
+      </div>
+
+      <div className="diagnosticGrid">
+        <div>
+          <span>Version</span>
+          <strong>{diagnostics?.version || "Chargement"}</strong>
+        </div>
+        <div>
+          <span>Mode</span>
+          <strong>{modeLabel}</strong>
+        </div>
+        <div>
+          <span>Connexion</span>
+          <strong>{sessionLabel}</strong>
+        </div>
+        <div>
+          <span>Données</span>
+          <strong>
+            {data.clients.length} clients · {data.documents.length} docs
+          </strong>
+        </div>
+        <div>
+          <span>Achats</span>
+          <strong>
+            {data.suppliers.length} fournisseurs · {data.purchaseOrders.length + data.purchaseInvoices.length} pièces
+          </strong>
+        </div>
+        <div>
+          <span>Dernière sauvegarde locale</span>
+          <strong>{lastLocalBackup}</strong>
+        </div>
+        <div>
+          <span>Sauvegarde OneDrive</span>
+          <strong>{oneDriveBackupLabel}</strong>
+        </div>
+        <div>
+          <span>Plateforme</span>
+          <strong>{diagnostics?.platform || "-"}</strong>
+        </div>
+      </div>
+
+      <div className="diagnosticPaths">
+        {pathRows.map((row) => (
+          <div className="diagnosticPathRow" key={row.key}>
+            <div>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
+            <button className="ghost subtleButton" type="button" disabled={!row.value} onClick={() => void copyValue(row.key, row.value)}>
+              <Clipboard size={15} /> {copiedKey === row.key ? "Copié" : "Copier"}
+            </button>
+            {row.canOpen && (
+              <button className="ghost subtleButton" type="button" disabled={busyPath === row.value} onClick={() => void openPath(row.value)}>
+                {busyPath === row.value ? <LoaderCircle className="spinIcon" size={15} /> : <FolderOpen size={15} />}
+                Ouvrir
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {error && <span className="preferenceHint diagnosticsError">{error}</span>}
     </section>
   );
 }

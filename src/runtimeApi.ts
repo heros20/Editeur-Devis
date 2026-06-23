@@ -7,6 +7,8 @@ export interface DevixApi {
   saveStore: (data: AppData) => Promise<AppData>;
   nextNumber: (type: DocumentType | "client") => Promise<string>;
   uuid: () => Promise<string>;
+  getDiagnostics: () => Promise<DevixDiagnostics>;
+  openPath: (targetPath: string) => Promise<{ opened: boolean; error?: string }>;
   savePdf: (payload: { html: string; defaultPath: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   saveExcel: (payload: { bytes: Uint8Array; defaultPath: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   exportJson: (data: AppData) => Promise<{ canceled: boolean; filePath?: string }>;
@@ -25,6 +27,20 @@ export interface DevixApi {
   selectAttachments: (documentId: string) => Promise<{ canceled: boolean; attachments: DocumentAttachment[] }>;
   openAttachment: (attachment: DocumentAttachment) => Promise<{ opened: boolean }>;
   deleteAttachment: (attachment: DocumentAttachment) => Promise<{ deleted: boolean }>;
+}
+
+export interface DevixDiagnostics {
+  version: string;
+  mode: "browser" | "development" | "installed" | "portable";
+  isPackaged: boolean;
+  platform: string;
+  userDataPath: string;
+  dataPath: string;
+  backupRoot: string;
+  attachmentsRoot: string;
+  oneDriveBackupRoot: string;
+  lastLocalBackupAt: string;
+  lastOneDriveBackupAt: string;
 }
 
 const storageKey = "devix:data:v1";
@@ -124,6 +140,24 @@ const browserApi: DevixApi = {
   },
   async uuid() {
     return crypto.randomUUID();
+  },
+  async getDiagnostics() {
+    return {
+      version: "navigateur",
+      mode: "browser",
+      isPackaged: false,
+      platform: navigator.platform || "browser",
+      userDataPath: "localStorage",
+      dataPath: storageKey,
+      backupRoot: "Non disponible en navigateur",
+      attachmentsRoot: "Données intégrées au navigateur",
+      oneDriveBackupRoot: "",
+      lastLocalBackupAt: "",
+      lastOneDriveBackupAt: "",
+    };
+  },
+  async openPath() {
+    return { opened: false, error: "Ouverture de dossier disponible uniquement dans l'application de bureau." };
   },
   async savePdf({ html, defaultPath }) {
     const printWindow = window.open("", "_blank", "width=920,height=1100");
