@@ -4,7 +4,6 @@ release/
 electron/
 scripts/
 supabase/
-auth-callback/
 
 *.log
 *.exe
