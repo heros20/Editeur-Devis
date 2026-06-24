@@ -146,8 +146,10 @@ function assertRemoteError(error: unknown) {
 }
 
 function authRedirectUrl() {
-  if (configuredAuthRedirectUrl) return configuredAuthRedirectUrl;
-  if (isDesktopRuntime()) return desktopAuthBridgeUrl;
+  if (isDesktopRuntime()) {
+    return configuredAuthRedirectUrl || desktopAuthBridgeUrl;
+  }
+
   return window.location.origin;
 }
 
