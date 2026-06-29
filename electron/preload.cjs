@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("devixApi", {
   exportJson: (data) => ipcRenderer.invoke("dialog:export-json", data),
   openEmail: (payload) => ipcRenderer.invoke("app:open-email", payload),
   openExternal: (url) => ipcRenderer.invoke("app:open-external", url),
+  openAuth: (url) => ipcRenderer.invoke("app:open-auth", url),
   authStorageGet: (key) => ipcRenderer.invoke("auth-storage:get", key),
   authStorageSet: (key, value) => ipcRenderer.invoke("auth-storage:set", key, value),
   authStorageRemove: (key) => ipcRenderer.invoke("auth-storage:remove", key),

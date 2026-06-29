@@ -1,7 +1,7 @@
-import { Building2, Mail, MapPin, Phone, Plus, Save, Search, Trash2 } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
-import type { BusinessExpense, CatalogItem, Supplier } from "./types";
-import { currency, makeId } from "./utils";
+import { Building2, Mail, MapPin, Package, Phone, Plus, Save, Search, Trash2 } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import type { BusinessExpense, CatalogItem, CompanySettings, Supplier } from "./types";
+import { currency, makeId, suggestedSalePriceHt } from "./utils";
 
 function newSupplier(): Supplier {
   const now = new Date().toISOString();
@@ -25,17 +25,25 @@ function newSupplier(): Supplier {
 export function SuppliersView({
   suppliers,
   catalog,
+  company,
   expenses,
   readOnly,
   onSave,
   onDelete,
+  onCreateItem,
+  onSaveItem,
+  onDeleteItem,
 }: {
   suppliers: Supplier[];
   catalog: CatalogItem[];
+  company: CompanySettings;
   expenses: BusinessExpense[];
   readOnly: boolean;
   onSave: (supplier: Supplier) => Promise<boolean>;
   onDelete: (supplier: Supplier) => Promise<boolean>;
+  onCreateItem: (supplier: Supplier) => Promise<void>;
+  onSaveItem: (item: CatalogItem) => Promise<void>;
+  onDeleteItem: (item: CatalogItem) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(suppliers[0]?.id || "");
@@ -233,9 +241,45 @@ export function SuppliersView({
                 />
               </label>
             </div>
-            {(linkedItems.length > 0 || linkedExpenses.length > 0) && (
+            {suppliers.some((supplier) => supplier.id === draft.id) && (
               <div className="supplierLinkedData">
-                {linkedItems.length > 0 && (
+                <section>
+                  <div className="supplierSectionTitle">
+                    <h3>Articles fournisseur</h3>
+                    {!readOnly && (
+                      <button type="button" className="ghost subtleButton" onClick={() => void onCreateItem(draft)}>
+                        <Plus size={16} /> Ajouter
+                      </button>
+                    )}
+                  </div>
+                  {linkedItems.length > 0 ? (
+                    <div className="supplierItemList">
+                      {linkedItems.map((item) => (
+                        <SupplierItemEditor
+                          key={item.id}
+                          item={item}
+                          readOnly={readOnly}
+                          company={company}
+                          onSave={onSaveItem}
+                          onDelete={onDeleteItem}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="supplierEmptyItems">
+                      <Package size={28} />
+                      <div>
+                        <strong>Aucun article pour ce fournisseur</strong>
+                        <small>Ajoutez les articles achetés ici pour les retrouver dans les commandes fournisseur.</small>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+            {linkedExpenses.length > 0 && (
+              <div className="supplierLinkedData">
+                {false && linkedItems.length > 0 && (
                   <section>
                     <h3>Articles du catalogue</h3>
                     <div>
@@ -276,5 +320,113 @@ export function SuppliersView({
         )}
       </section>
     </section>
+  );
+}
+
+function SupplierItemEditor({
+  item,
+  readOnly,
+  company,
+  onSave,
+  onDelete,
+}: {
+  item: CatalogItem;
+  readOnly: boolean;
+  company: CompanySettings;
+  onSave: (item: CatalogItem) => Promise<void>;
+  onDelete: (item: CatalogItem) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(item);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft(item), [item.id]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(item);
+  const patch = (partial: Partial<CatalogItem>) => setDraft((current) => ({ ...current, ...partial }));
+  const stockUnit = draft.stockUnit || draft.unit || "u";
+  const suggestedPrice = suggestedSalePriceHt(draft.purchasePrice, company.corporateTaxRate);
+
+  async function save() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    await onSave(draft);
+    setSaving(false);
+  }
+
+  return (
+    <article className="supplierItemEditor">
+      <label className="wide">
+        Article
+        <input disabled={readOnly} value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
+      </label>
+      <label>
+        Unité
+        <input
+          disabled={readOnly}
+          value={draft.unit}
+          onChange={(event) => patch({ unit: event.target.value, stockUnit: event.target.value || stockUnit })}
+        />
+      </label>
+      <label>
+        Prix achat HT
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          disabled={readOnly}
+          value={draft.purchasePrice || ""}
+          onChange={(event) => patch({ purchasePrice: Number(event.target.value) })}
+        />
+      </label>
+      <label>
+        TVA
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          disabled={readOnly}
+          value={draft.vatRate || ""}
+          onChange={(event) => patch({ vatRate: Number(event.target.value) })}
+        />
+      </label>
+      <label className="supplierStockToggle">
+        <input
+          type="checkbox"
+          disabled={readOnly}
+          checked={draft.trackStock}
+          onChange={(event) => patch({ trackStock: event.target.checked, stockUnit })}
+        />
+        Stock
+      </label>
+      <label>
+        Stock mini
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          disabled={readOnly || !draft.trackStock}
+          value={draft.stockMinimum || ""}
+          onChange={(event) => patch({ stockMinimum: Number(event.target.value) })}
+        />
+      </label>
+      <strong>{currency(draft.purchasePrice)} HT</strong>
+      <span className="supplierSuggestedPrice">
+        <small>Conseillé</small>
+        <strong>{suggestedPrice > 0 ? currency(suggestedPrice) : "-"}</strong>
+      </span>
+      {!readOnly && (
+        <>
+          <button type="button" className="iconButton" aria-label="Enregistrer cet article" disabled={!dirty || saving} onClick={() => void save()}>
+            <Save size={16} />
+          </button>
+          <button
+            type="button"
+            className="iconButton dangerIcon"
+            aria-label={`Supprimer ${item.name || "cet article"}`}
+            onClick={() => void onDelete(item)}
+          >
+            <Trash2 size={16} />
+          </button>
+        </>
+      )}
+    </article>
   );
 }

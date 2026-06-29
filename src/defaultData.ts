@@ -43,6 +43,7 @@ export const defaultCompany: CompanySettings = {
   defaultVatRate: 20,
   defaultDepositRate: 30,
   includeVatInNetEstimate: true,
+  corporateTaxRate: 25,
   notes: "",
 };
 
@@ -291,6 +292,7 @@ function normalizeClient(client: Partial<Client>): Client {
   return {
     id: client.id || makeId("client"),
     number: client.number || "CLI-0000",
+    parentId: client.parentId,
     type: client.type === "professionnel" ? "professionnel" : "particulier",
     name: client.name || "Client à renseigner",
     contact: client.contact || "",
@@ -488,6 +490,7 @@ export function normalizeData(input?: Partial<AppData> | null): AppData {
       typeof input?.company?.includeVatInNetEstimate === "boolean"
         ? input.company.includeVatInNetEstimate
         : fallback.company.includeVatInNetEstimate,
+    corporateTaxRate: normalizeNumber(input?.company?.corporateTaxRate, fallback.company.corporateTaxRate ?? 25),
   };
   const suppliers = Array.isArray(input?.suppliers) ? input.suppliers.map(normalizeSupplier) : fallback.suppliers;
   const catalog = (Array.isArray(input?.catalog) ? input.catalog.map(normalizeCatalogItem) : fallback.catalog).map((item) => {

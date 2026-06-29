@@ -146,10 +146,8 @@ function assertRemoteError(error: unknown) {
 }
 
 function authRedirectUrl() {
-  if (isDesktopRuntime()) {
-    return configuredAuthRedirectUrl || desktopAuthBridgeUrl;
-  }
-
+  if (configuredAuthRedirectUrl) return configuredAuthRedirectUrl;
+  if (desktopAuthBridgeUrl) return desktopAuthBridgeUrl;
   return window.location.origin;
 }
 
@@ -266,7 +264,17 @@ export async function signInWithGoogle() {
   });
   assertRemoteError(error);
   if (isDesktopRuntime() && data.url) {
-    await getDevixApi().openExternal(data.url);
+    const result = await getDevixApi().openAuth(data.url);
+    if (result.callbackUrl) {
+      const callback = new URL(result.callbackUrl);
+      const errorDescription = callback.searchParams.get("error_description") || callback.searchParams.get("error");
+      if (errorDescription) throw new Error(errorDescription);
+      const code = callback.searchParams.get("code");
+      if (code) {
+        const exchanged = await supabase.auth.exchangeCodeForSession(code);
+        assertRemoteError(exchanged.error);
+      }
+    }
   }
   return data;
 }

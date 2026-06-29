@@ -598,6 +598,75 @@ ipcMain.handle("app:open-external", async (_event, targetUrl) => {
   return { opened: true };
 });
 
+ipcMain.handle("app:open-auth", async (_event, targetUrl) => {
+  const url = String(targetUrl || "");
+  if (!/^https:\/\//i.test(url)) throw new Error("URL d'authentification non autorisee.");
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const authWindow = new BrowserWindow({
+      parent: mainWindow,
+      modal: true,
+      width: 520,
+      height: 720,
+      title: "Connexion Google",
+      backgroundColor: "#ffffff",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: `auth-${crypto.randomUUID()}`,
+      },
+    });
+
+    const finish = (callbackUrl) => {
+      if (settled) return;
+      settled = true;
+      if (!authWindow.isDestroyed()) authWindow.close();
+      resolve({ opened: true, callbackUrl });
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      if (!authWindow.isDestroyed()) authWindow.close();
+      reject(error);
+    };
+
+    const maybeHandleCallback = (navigationUrl) => {
+      const value = String(navigationUrl || "");
+      if (value.startsWith(`http://127.0.0.1:${localAuthCallbackPort}/auth-callback`)) {
+        finish(value);
+        return true;
+      }
+      if (isAppDeepLink(value)) {
+        finish(value.replace(`${appProtocol}://app/index.html`, `http://127.0.0.1:${localAuthCallbackPort}/auth-callback`));
+        return true;
+      }
+      return false;
+    };
+
+    authWindow.webContents.setWindowOpenHandler(({ url: openedUrl }) => {
+      if (maybeHandleCallback(openedUrl)) return { action: "deny" };
+      return { action: "allow" };
+    });
+
+    authWindow.webContents.on("will-redirect", (event, navigationUrl) => {
+      if (maybeHandleCallback(navigationUrl)) event.preventDefault();
+    });
+    authWindow.webContents.on("will-navigate", (event, navigationUrl) => {
+      if (maybeHandleCallback(navigationUrl)) event.preventDefault();
+    });
+    authWindow.webContents.on("did-fail-load", (_event, _code, description) => {
+      if (!settled && description && /ERR_ABORTED/i.test(description)) return;
+    });
+    authWindow.on("closed", () => {
+      if (!settled) resolve({ opened: false });
+    });
+
+    authWindow.loadURL(url).catch(fail);
+  });
+});
+
 async function createPdfFile(html, filePath) {
   const htmlPath = path.join(app.getPath("temp"), "devix", "pdf", `${crypto.randomUUID()}.html`);
   const pdfWindow = new BrowserWindow({

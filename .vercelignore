@@ -12,3 +12,6 @@ supabase/
 .env
 .env.local
 .env.*.local
+build/
+.git/
+*.tmp

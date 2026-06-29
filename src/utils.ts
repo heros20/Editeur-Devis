@@ -79,6 +79,16 @@ export function lineMargin(line: LineItem) {
   };
 }
 
+export function suggestedSalePriceHt(purchasePrice: number, corporateTaxRate = 0, targetNetMarginRate = 30) {
+  const cost = Math.max(0, Number(purchasePrice) || 0);
+  if (cost <= 0) return 0;
+  const taxRate = Math.min(95, Math.max(0, Number(corporateTaxRate) || 0)) / 100;
+  const targetRate = Math.min(95, Math.max(0, Number(targetNetMarginRate) || 0)) / 100;
+  const preTaxMarginRate = taxRate >= 1 ? targetRate : targetRate / Math.max(0.01, 1 - taxRate);
+  const denominator = Math.max(0.01, 1 - preTaxMarginRate);
+  return cost / denominator;
+}
+
 export function totals(lines: LineItem[]) {
   const totalHt = lines.reduce((sum, line) => sum + lineTotalHt(line), 0);
   const vatGroups = lines.reduce<Record<string, number>>((groups, line) => {

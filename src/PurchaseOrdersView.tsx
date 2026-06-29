@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, Mail, Plus, ReceiptText, Save, Search, Trash2, X } from "lucide-react";
+import { CheckCircle2, FileText, Mail, PackageCheck, Plus, ReceiptText, Save, Search, Trash2, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { purchaseLinesTotals } from "./purchaseInvoices";
 import { nextPurchaseOrderNumber } from "./purchaseOrders";
@@ -61,6 +61,7 @@ export function PurchaseOrdersView({
   selectedSupplier,
   readOnly,
   onSave,
+  onReceive,
   onEmail,
   onCreateInvoice,
   onDelete,
@@ -76,6 +77,7 @@ export function PurchaseOrdersView({
   selectedSupplier?: Supplier;
   readOnly: boolean;
   onSave: (order: PurchaseOrder) => Promise<boolean>;
+  onReceive: (order: PurchaseOrder) => Promise<boolean>;
   onEmail: (order: PurchaseOrder) => Promise<boolean>;
   onCreateInvoice: (order: PurchaseOrder) => Promise<boolean>;
   onDelete: (order: PurchaseOrder) => Promise<boolean>;
@@ -96,11 +98,11 @@ export function PurchaseOrdersView({
       return;
     }
     const updated = orders.find((order) => order.id === selectedId);
-    if (updated) {
-      setDraft({ ...updated, lines: updated.lines.map((line) => ({ ...line })) });
-      return;
-    }
     setDraft((current) => {
+      if (updated) {
+        if (current?.id === updated.id && current.updatedAt === updated.updatedAt) return current;
+        return { ...updated, lines: updated.lines.map((line) => ({ ...line })) };
+      }
       if (current?.id === selectedId) return current;
       setSelectedId("");
       return null;
@@ -144,7 +146,7 @@ export function PurchaseOrdersView({
     [orders]
   );
   const supplierId = draft?.supplierId;
-  const supplierCatalog = supplierId ? catalog.filter((item) => !item.supplierId || item.supplierId === supplierId) : catalog;
+  const supplierCatalog = supplierId ? catalog.filter((item) => item.supplierId === supplierId || !item.trackStock) : catalog;
   const totals = draft ? purchaseLinesTotals(draft.lines) : { totalHt: 0, totalVat: 0, totalTtc: 0 };
   const persisted = Boolean(draft && orders.some((order) => order.id === draft.id));
   const locked = readOnly || draft?.status !== "draft";
@@ -315,15 +317,20 @@ export function PurchaseOrdersView({
                     <button type="submit" className="ghost" disabled={busy}>
                       <Save size={17} /> Enregistrer
                     </button>
-                    <button type="button" disabled={busy || !valid} onClick={() => void run(onEmail)}>
-                      <Mail size={17} /> Envoyer par email
+                    <button type="button" className="ghost" disabled={busy || !valid} onClick={() => void run(onReceive)}>
+                      <PackageCheck size={17} /> Entrer en stock
                     </button>
                   </>
                 )}
-                {!readOnly && draft.status === "sent" && (
-                  <button type="button" disabled={busy} onClick={() => void run(onCreateInvoice)}>
-                    <ReceiptText size={17} /> Transformer en facture
-                  </button>
+                {!readOnly && (draft.status === "received" || draft.status === "sent") && (
+                  <>
+                    <button type="button" className="ghost" disabled={busy} onClick={() => void run(onEmail)}>
+                      <Mail size={17} /> Envoyer par email
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void run(onCreateInvoice)}>
+                      <ReceiptText size={17} /> Transformer en facture
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -381,10 +388,13 @@ export function PurchaseOrdersView({
                 <span>Prix HT</span>
                 <span>TVA</span>
                 <span>Total HT</span>
+                <span>Total TTC</span>
                 <span />
               </div>
               {draft.lines.map((line) => {
                 const linked = catalog.find((item) => item.id === line.catalogItemId);
+                const lineHt = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+                const lineTtc = lineHt * (1 + Math.max(0, Number(line.vatRate) || 0) / 100);
                 return (
                   <div className="purchaseLine" key={line.id}>
                     <select
@@ -436,7 +446,8 @@ export function PurchaseOrdersView({
                         </option>
                       ))}
                     </select>
-                    <strong>{currency(line.quantity * line.unitPrice)}</strong>
+                    <strong>{currency(lineHt)}</strong>
+                    <strong>{currency(lineTtc)}</strong>
                     {!locked ? (
                       <button
                         type="button"

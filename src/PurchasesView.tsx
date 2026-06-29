@@ -12,6 +12,7 @@ export function PurchasesView(props: {
   defaultVatRate: number;
   readOnly: boolean;
   onSaveOrder: (order: PurchaseOrder) => Promise<boolean>;
+  onReceiveOrder: (order: PurchaseOrder) => Promise<boolean>;
   onEmailOrder: (order: PurchaseOrder) => Promise<boolean>;
   onCreateInvoice: (order: PurchaseOrder) => Promise<boolean>;
   onDeleteOrder: (order: PurchaseOrder) => Promise<boolean>;
@@ -32,7 +33,9 @@ export function PurchasesView(props: {
   const selectedSupplier = props.suppliers.find((supplier) => supplier.id === supplierId);
   const orders = selectedSupplier ? props.orders.filter((order) => order.supplierId === selectedSupplier.id) : [];
   const invoices = selectedSupplier ? props.invoices.filter((invoice) => invoice.supplierId === selectedSupplier.id) : [];
-  const catalog = selectedSupplier ? props.catalog.filter((item) => !item.supplierId || item.supplierId === selectedSupplier.id) : [];
+  const catalog = selectedSupplier
+    ? props.catalog.filter((item) => item.supplierId === selectedSupplier.id || !item.trackStock)
+    : [];
 
   if (!selectedSupplier) {
     return (
@@ -126,6 +129,7 @@ export function PurchasesView(props: {
           defaultVatRate={props.defaultVatRate}
           readOnly={props.readOnly}
           onSave={props.onSaveOrder}
+          onReceive={props.onReceiveOrder}
           onEmail={props.onEmailOrder}
           onCreateInvoice={async (order) => {
             const created = await props.onCreateInvoice(order);

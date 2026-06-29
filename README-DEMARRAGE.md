@@ -97,6 +97,12 @@ Authentication > URL Configuration > Redirect URLs
 https://devix-auth.vercel.app
 ```
 
+Si vous utilisez la fonction Supabase `auth-callback`, ajoutez aussi le domaine du site en secret de fonction pour que la page de confirmation propose le bon bouton:
+
+```text
+PUBLIC_SITE_URL=https://votre-site.fr
+```
+
 Si vous publiez la page dans un sous-dossier, utilisez l'URL complete, par exemple:
 
 ```text

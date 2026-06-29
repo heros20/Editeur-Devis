@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BusinessDocument, LineItem } from "./types";
-import { formatBusinessNumber, paymentSummary, totals, withPaymentStatus } from "./utils";
+import { formatBusinessNumber, paymentSummary, suggestedSalePriceHt, totals, withPaymentStatus } from "./utils";
 
 const line = (partial: Partial<LineItem>): LineItem => ({
   id: "line-1",
@@ -59,6 +59,12 @@ describe("business totals", () => {
   it("formats business numbers with type prefix and padded counter", () => {
     expect(formatBusinessNumber("invoice", 7, 2026)).toBe("FAC-2026-0007");
     expect(formatBusinessNumber("creditNote", 12, 2026)).toBe("AVO-2026-0012");
+  });
+
+  it("suggests a sale price that keeps 30% net margin after corporate tax", () => {
+    const suggested = suggestedSalePriceHt(100, 25);
+    const netMargin = ((suggested - 100) * 0.75) / suggested;
+    expect(netMargin).toBeCloseTo(0.3, 10);
   });
 });
 

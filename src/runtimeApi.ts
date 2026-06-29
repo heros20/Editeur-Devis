@@ -14,6 +14,7 @@ export interface DevixApi {
   exportJson: (data: AppData) => Promise<{ canceled: boolean; filePath?: string }>;
   openEmail: (payload: { to?: string; subject: string; body: string }) => Promise<{ opened: boolean }>;
   openExternal: (url: string) => Promise<{ opened: boolean }>;
+  openAuth: (url: string) => Promise<{ opened: boolean; callbackUrl?: string }>;
   authStorageGet: (key: string) => Promise<string | null>;
   authStorageSet: (key: string, value: string) => Promise<{ saved: boolean }>;
   authStorageRemove: (key: string) => Promise<{ removed: boolean }>;
@@ -185,6 +186,10 @@ const browserApi: DevixApi = {
     return { opened: true };
   },
   async openExternal(url) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return { opened: true };
+  },
+  async openAuth(url) {
     window.open(url, "_blank", "noopener,noreferrer");
     return { opened: true };
   },

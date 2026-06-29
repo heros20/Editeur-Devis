@@ -41,11 +41,6 @@
         line-height: 1.45;
       }
 
-      a {
-        color: #1f5f52;
-        font-weight: 800;
-      }
-
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -61,6 +56,7 @@
         border-radius: 6px;
         background: #1f5f52;
         color: white;
+        font-weight: 700;
         text-decoration: none;
       }
 
@@ -82,23 +78,27 @@
       </div>
     </main>
     <script>
-      const localCallback = `http://127.0.0.1:43177/auth-callback${window.location.search || ""}${window.location.hash || ""}`;
-      const deepLink = `devix://app/index.html${window.location.search || ""}${window.location.hash || ""}`;
-      const siteUrl = window.location.origin;
+      const localCallbackUrl = "http://127.0.0.1:43177/auth-callback";
+      const desktopRedirectUrl = "devix://app/index.html";
+      const hashPayload = window.location.hash ? window.location.hash.slice(1) : "";
+      const authPayload = window.location.search || (hashPayload ? "?" + hashPayload : "");
+      const params = new URLSearchParams(window.location.search || hashPayload);
+      const authError = params.get("auth_error") || params.get("error_code") || params.get("error");
       const openSite = document.getElementById("openSite");
       const openApp = document.getElementById("openApp");
       const title = document.getElementById("title");
       const status = document.getElementById("status");
       const fallback = document.getElementById("fallback");
-      const params = new URLSearchParams(window.location.search);
-      const authError = params.get("error_description") || params.get("error");
 
-      openSite.href = siteUrl;
-      openApp.href = deepLink;
+      openSite.href = window.location.origin;
+      openApp.href = desktopRedirectUrl + authPayload;
 
       if (authError) {
         title.textContent = "Confirmation impossible";
-        status.textContent = authError;
+        status.textContent =
+          authError === "otp_expired"
+            ? "Ce lien de confirmation a expire ou a deja ete utilise. Demandez un nouvel email de confirmation."
+            : "Le lien de confirmation n'est plus valide.";
       }
 
       function closeThisTab() {
@@ -129,7 +129,7 @@
           return;
         }
         try {
-          await fetch(localCallback, { cache: "no-store" });
+          await fetch(localCallbackUrl + authPayload, { cache: "no-store" });
           status.textContent = "Compte confirme dans Devix. Fermeture de cette page...";
           closeThisTab();
         } catch {

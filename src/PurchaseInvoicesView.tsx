@@ -71,11 +71,15 @@ export function PurchaseInvoicesView({
       return;
     }
     const updated = invoices.find((invoice) => invoice.id === selectedId);
-    if (updated) setDraft({ ...updated, lines: [...updated.lines] });
-    else {
+    setDraft((current) => {
+      if (updated) {
+        if (current?.id === updated.id && current.updatedAt === updated.updatedAt) return current;
+        return { ...updated, lines: updated.lines.map((line) => ({ ...line })) };
+      }
+      if (current?.id === selectedId) return current;
       setSelectedId("");
-      setDraft(null);
-    }
+      return null;
+    });
   }, [invoices, selectedId]);
 
   const filteredInvoices = useMemo(() => {
@@ -86,7 +90,7 @@ export function PurchaseInvoicesView({
   }, [invoices, query]);
 
   const supplierId = draft?.supplierId;
-  const supplierCatalog = supplierId ? catalog.filter((item) => !item.supplierId || item.supplierId === supplierId) : catalog;
+  const supplierCatalog = supplierId ? catalog.filter((item) => item.supplierId === supplierId || !item.trackStock) : catalog;
   const totals = draft ? purchaseInvoiceTotals(draft) : { totalHt: 0, totalVat: 0, totalTtc: 0 };
   const persisted = Boolean(draft && invoices.some((invoice) => invoice.id === draft.id));
   const locked = readOnly || draft?.status === "posted";
@@ -338,10 +342,13 @@ export function PurchaseInvoicesView({
                 <span>Prix HT</span>
                 <span>TVA</span>
                 <span>Total HT</span>
+                <span>Total TTC</span>
                 <span />
               </div>
               {draft.lines.map((line) => {
                 const linkedItem = catalog.find((item) => item.id === line.catalogItemId);
+                const lineHt = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+                const lineTtc = lineHt * (1 + Math.max(0, Number(line.vatRate) || 0) / 100);
                 return (
                   <div className="purchaseLine" key={line.id}>
                     <select
@@ -395,7 +402,8 @@ export function PurchaseInvoicesView({
                         </option>
                       ))}
                     </select>
-                    <strong>{currency(line.quantity * line.unitPrice)}</strong>
+                    <strong>{currency(lineHt)}</strong>
+                    <strong>{currency(lineTtc)}</strong>
                     {!locked ? (
                       <button
                         type="button"

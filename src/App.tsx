@@ -1,4 +1,4 @@
-import {
+﻿import {
   ArrowLeft,
   Archive,
   Building2,
@@ -115,6 +115,7 @@ import {
   sanitizeFileName,
   statusLabels,
   statusTone,
+  suggestedSalePriceHt,
   todayIso,
   totals,
   withPaymentStatus,
@@ -149,12 +150,59 @@ type ChoiceConfirmationState = {
   title: string;
   message: string;
 };
+type DashboardWidgetId =
+  | "quotes"
+  | "orders"
+  | "invoices"
+  | "pending"
+  | "status"
+  | "due"
+  | "recent"
+  | "stock"
+  | "clients"
+  | "purchases"
+  | "suppliers"
+  | "catalog"
+  | "accounting";
+
+const dashboardStorageKey = "devix.dashboard.widgets";
+const defaultDashboardWidgets: DashboardWidgetId[] = ["quotes", "orders", "invoices", "pending", "status", "due", "recent"];
+const allDashboardWidgets: Array<{ id: DashboardWidgetId; label: string }> = [
+  { id: "quotes", label: "Devis" },
+  { id: "orders", label: "Commandes" },
+  { id: "invoices", label: "Factures" },
+  { id: "pending", label: "A encaisser" },
+  { id: "status", label: "Suivi des affaires" },
+  { id: "due", label: "Echeances" },
+  { id: "recent", label: "Activite recente" },
+  { id: "stock", label: "Articles et stock" },
+  { id: "clients", label: "Clients" },
+  { id: "purchases", label: "Achats" },
+  { id: "suppliers", label: "Fournisseurs" },
+  { id: "catalog", label: "Catalogue" },
+  { id: "accounting", label: "Comptes" },
+];
+
+function normalizeDashboardWidgets(value: unknown): DashboardWidgetId[] {
+  const allowed = new Set(allDashboardWidgets.map((widget) => widget.id));
+  if (!Array.isArray(value)) return defaultDashboardWidgets;
+  const normalized = value.filter((id): id is DashboardWidgetId => typeof id === "string" && allowed.has(id as DashboardWidgetId));
+  return normalized.length ? normalized : defaultDashboardWidgets;
+}
+
+function loadDashboardWidgets(): DashboardWidgetId[] {
+  try {
+    return normalizeDashboardWidgets(JSON.parse(localStorage.getItem(dashboardStorageKey) || "null"));
+  } catch {
+    return defaultDashboardWidgets;
+  }
+}
 
 const roleLabels: Record<WorkspaceRole, string> = {
   superadmin: "Superadmin",
-  owner: "Propriétaire",
+  owner: "PropriÃ©taire",
   admin: "Admin",
-  editor: "Édition",
+  editor: "Ã‰dition",
   viewer: "Lecture",
 };
 
@@ -184,6 +232,12 @@ function clientSearchText(client: Client) {
       .filter(Boolean)
       .join(" ")
   );
+}
+
+function clientDisplayLabel(client: Client | undefined, clients: Client[]) {
+  if (!client) return clientLabel(client);
+  const parent = client.parentId ? clients.find((entry) => entry.id === client.parentId) : undefined;
+  return parent ? `${parent.name || parent.number} / ${client.name || client.number}` : clientLabel(client);
 }
 
 function activityDate(doc: BusinessDocument) {
@@ -302,6 +356,7 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [view, setView] = useState<View>("dashboard");
+  const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidgetId[]>(loadDashboardWidgets);
   const [selectedId, setSelectedId] = useState("");
   const [documentBackView, setDocumentBackView] = useState<"documents" | "clients" | "archives">("documents");
   const [query, setQuery] = useState("");
@@ -404,11 +459,11 @@ export function App() {
         setData(normalizeData(local));
         setLoadError(message);
       } catch (error) {
-        console.error("Impossible de charger les données locales", error);
+        console.error("Impossible de charger les donnÃ©es locales", error);
         if (!active) return;
         setWorkspace(null);
         setData(createDefaultAppData());
-        setLoadError("Données locales indisponibles.");
+        setLoadError("DonnÃ©es locales indisponibles.");
       } finally {
         if (active) setLoaded(true);
       }
@@ -428,9 +483,9 @@ export function App() {
         setData(normalizeData(remote.data));
         setLoadError("");
       } catch (error) {
-        console.error("Impossible de charger les données", error);
+        console.error("Impossible de charger les donnÃ©es", error);
         if (!active) return;
-        await loadLocalStore("Données distantes indisponibles. Mode local actif.");
+        await loadLocalStore("DonnÃ©es distantes indisponibles. Mode local actif.");
         return;
       }
       if (active) setLoaded(true);
@@ -456,9 +511,9 @@ export function App() {
     };
   }, [api]);
 
-  async function persist(next: AppData, message = "Enregistré", showSuccessNotice = true) {
+  async function persist(next: AppData, message = "EnregistrÃ©", showSuccessNotice = true) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return false;
     }
     const previous = data;
@@ -475,7 +530,7 @@ export function App() {
       if (showSuccessNotice) setNotice(message);
       return true;
     } catch (error) {
-      console.error("Impossible d'enregistrer les données", error);
+      console.error("Impossible d'enregistrer les donnÃ©es", error);
       setData(previous);
       setNotice(userFacingError(error, "Sauvegarde indisponible"));
       return false;
@@ -490,7 +545,7 @@ export function App() {
       try {
         count = await reserveRemoteCounter(workspace, type);
       } catch (error) {
-        console.warn("Numérotation distante indisponible, compteur local utilisé", error);
+        console.warn("NumÃ©rotation distante indisponible, compteur local utilisÃ©", error);
       }
     }
     const number = formatBusinessNumber(type, count);
@@ -506,10 +561,11 @@ export function App() {
     };
   }
 
-  function buildClient(number: string, name = "Client à renseigner"): Client {
+  function buildClient(number: string, name = "Client Ã  renseigner"): Client {
     return {
       id: makeId("client"),
       number,
+      parentId: undefined,
       type: "particulier",
       name,
       contact: "",
@@ -567,14 +623,14 @@ export function App() {
     return [
       company.name,
       company.legalName,
-      `SIRET : ${company.siret || "à renseigner"}`,
-      `TVA : ${company.vatNumber || "à renseigner"}`,
+      `SIRET : ${company.siret || "Ã  renseigner"}`,
+      `TVA : ${company.vatNumber || "Ã  renseigner"}`,
       `${company.address}\n${company.postalCode} ${company.city}`.trim(),
-      `Téléphone : ${company.phone}`,
+      `TÃ©lÃ©phone : ${company.phone}`,
       `Email: ${company.email}`,
       company.website ? `Site: ${company.website}` : "",
-      `IBAN : ${company.iban || "à renseigner"}`,
-      `BIC : ${company.bic || "à renseigner"}`,
+      `IBAN : ${company.iban || "Ã  renseigner"}`,
+      `BIC : ${company.bic || "Ã  renseigner"}`,
       `Conditions : ${company.paymentTerms}`,
     ]
       .filter(Boolean)
@@ -589,7 +645,7 @@ export function App() {
       statusLabels[doc.status],
       doc.projectName,
       doc.siteAddress,
-      clientLabel(client),
+      clientDisplayLabel(client, data.clients),
       client?.email,
       client?.phone,
       data.company.name,
@@ -624,12 +680,15 @@ export function App() {
     () => superadminWorkspaces.find((entry) => entry.organizationId === selectedSuperadminOrganizationId) || null,
     [selectedSuperadminOrganizationId, superadminWorkspaces]
   );
-  const sortedClients = useMemo(() => [...data.clients].sort((a, b) => clientLabel(a).localeCompare(clientLabel(b), "fr")), [data.clients]);
+  const sortedClients = useMemo(
+    () => [...data.clients].sort((a, b) => clientDisplayLabel(a, data.clients).localeCompare(clientDisplayLabel(b, data.clients), "fr")),
+    [data.clients]
+  );
   const sortedDocuments = useMemo(
     () =>
       [...activeDocuments].sort((a, b) => {
-        const clientA = clientLabel(data.clients.find((client) => client.id === a.clientId));
-        const clientB = clientLabel(data.clients.find((client) => client.id === b.clientId));
+        const clientA = clientDisplayLabel(data.clients.find((client) => client.id === a.clientId), data.clients);
+        const clientB = clientDisplayLabel(data.clients.find((client) => client.id === b.clientId), data.clients);
         return clientA.localeCompare(clientB, "fr") || b.updatedAt.localeCompare(a.updatedAt) || b.number.localeCompare(a.number);
       }),
     [activeDocuments, data.clients]
@@ -657,7 +716,8 @@ export function App() {
   }, [activeDocuments, data.clients]);
   const filteredClients = useMemo(() => {
     const terms = normalizeSearch(clientQuery).split(/\s+/).filter(Boolean);
-    return sortedClients
+    const mainClients = sortedClients.filter((client) => !client.parentId);
+    return mainClients
       .filter((client) => {
         const stats = clientStatsById.get(client.id);
         if (clientListFilter === "professionnel" || clientListFilter === "particulier") return client.type === clientListFilter;
@@ -665,15 +725,19 @@ export function App() {
         if (clientListFilter === "withDocuments") return Boolean(stats && stats.documents > 0);
         return true;
       })
-      .filter((client) => !terms.length || terms.every((term) => clientSearchText(client).includes(term)));
-  }, [clientListFilter, clientQuery, clientStatsById, sortedClients]);
+      .filter((client) => {
+        if (!terms.length) return true;
+        const relatedClients = [client, ...data.clients.filter((entry) => entry.parentId === client.id)];
+        return terms.every((term) => relatedClients.some((entry) => clientSearchText(entry).includes(term)));
+      });
+  }, [clientListFilter, clientQuery, clientStatsById, data.clients, sortedClients]);
   const clientFilterCounts = useMemo(
     () => ({
-      all: sortedClients.length,
-      professionnel: sortedClients.filter((client) => client.type === "professionnel").length,
-      particulier: sortedClients.filter((client) => client.type === "particulier").length,
-      due: sortedClients.filter((client) => (clientStatsById.get(client.id)?.due || 0) > 0).length,
-      withDocuments: sortedClients.filter((client) => (clientStatsById.get(client.id)?.documents || 0) > 0).length,
+      all: sortedClients.filter((client) => !client.parentId).length,
+      professionnel: sortedClients.filter((client) => !client.parentId && client.type === "professionnel").length,
+      particulier: sortedClients.filter((client) => !client.parentId && client.type === "particulier").length,
+      due: sortedClients.filter((client) => !client.parentId && (clientStatsById.get(client.id)?.due || 0) > 0).length,
+      withDocuments: sortedClients.filter((client) => !client.parentId && (clientStatsById.get(client.id)?.documents || 0) > 0).length,
     }),
     [clientStatsById, sortedClients]
   );
@@ -688,8 +752,11 @@ export function App() {
     [data.clients, draftClient, selectedClientId]
   );
   const selectedClientDocuments = useMemo(
-    () => (draftClient?.id === selectedClientId ? [] : sortedDocuments.filter((doc) => doc.clientId === selectedClientId)),
-    [draftClient, selectedClientId, sortedDocuments]
+    () => {
+      const folderClientIds = new Set([selectedClientId, ...data.clients.filter((client) => client.parentId === selectedClientId).map((client) => client.id)]);
+      return sortedDocuments.filter((doc) => folderClientIds.has(doc.clientId));
+    },
+    [data.clients, selectedClientId, sortedDocuments]
   );
   const canSuperadmin = workspace?.role === "superadmin";
   const canManageTeam = workspace?.role === "owner" || workspace?.role === "admin" || canSuperadmin;
@@ -747,7 +814,7 @@ export function App() {
     return `Stock insuffisant pour transformer ce document : ${details}${suffix}.`;
   }
 
-  function showPermissionNotice(message = "Action réservée aux administrateurs.") {
+  function showPermissionNotice(message = "Action rÃ©servÃ©e aux administrateurs.") {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2200);
   }
@@ -769,6 +836,10 @@ export function App() {
     if (view === "company" && !canViewCompanySettings) setView("settings");
     if (view === "superadmin" && !canSuperadmin) setView("dashboard");
   }, [canManageCatalog, canSuperadmin, canViewCompanySettings, view]);
+
+  useEffect(() => {
+    localStorage.setItem(dashboardStorageKey, JSON.stringify(dashboardWidgets));
+  }, [dashboardWidgets]);
 
   async function refreshTeam() {
     if (!workspace) {
@@ -814,7 +885,7 @@ export function App() {
       );
     } catch (error) {
       console.error("Superadmin indisponible", error);
-      setSuperadminError(error instanceof Error ? error.message : "Accès superadmin indisponible");
+      setSuperadminError(error instanceof Error ? error.message : "AccÃ¨s superadmin indisponible");
     } finally {
       setSuperadminBusy(false);
     }
@@ -827,25 +898,25 @@ export function App() {
 
   async function deleteSuperadminWorkspace(target: SuperadminWorkspace) {
     if (!canSuperadmin || superadminBusy) {
-      showPermissionNotice("Accès superadmin requis.");
+      showPermissionNotice("AccÃ¨s superadmin requis.");
       return;
     }
     const expected = `SUPPRIMER ${target.organizationName}`;
     const currentWorkspaceDeleted = workspace?.organizationId === target.organizationId;
     if (
       !confirmDestructiveAction(
-        `Supprimer définitivement l'entreprise « ${target.organizationName} » ? Tous ses documents, comptes, achats et accès seront supprimés.`
+        `Supprimer dÃ©finitivement l'entreprise Â« ${target.organizationName} Â» ? Tous ses documents, comptes, achats et accÃ¨s seront supprimÃ©s.`
       )
     ) {
       return;
     }
     const confirmed = await requestTypedConfirmation(
       "Confirmer la suppression",
-      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
+      `DerniÃ¨re vÃ©rification : tapez exactement Â« ${expected} Â» pour confirmer.`,
       expected
     );
     if (!confirmed) {
-      const message = "Suppression annulée : confirmation incorrecte.";
+      const message = "Suppression annulÃ©e : confirmation incorrecte.";
       setSuperadminError(message);
       showPermissionNotice(message);
       return;
@@ -855,7 +926,7 @@ export function App() {
     setSuperadminError("");
     try {
       await deleteSuperadminOrganization(target.organizationId);
-      setNotice(`Entreprise « ${target.organizationName} » supprimée`);
+      setNotice(`Entreprise Â« ${target.organizationName} Â» supprimÃ©e`);
       if (currentWorkspaceDeleted) {
         const remote = await loadRemoteWorkspace();
         setWorkspace(remote.context);
@@ -889,7 +960,7 @@ export function App() {
     try {
       const nextSession = authMode === "signin" ? await signInWithPassword(email, password) : await signUpWithPassword(email, password);
       if (!nextSession) {
-        setAuthMessage("Compte créé. Vérifiez votre boîte mail pour confirmer l'inscription.");
+        setAuthMessage("Compte crÃ©Ã©. VÃ©rifiez votre boÃ®te mail pour confirmer l'inscription.");
       } else {
         const remote = await loadRemoteWorkspace();
         setWorkspace(remote.context);
@@ -931,7 +1002,7 @@ export function App() {
     setAuthMessage("");
     try {
       await sendPasswordSetupEmail(email);
-      setAuthMessage("Email envoyé. Ouvrez le lien reçu pour définir votre mot de passe.");
+      setAuthMessage("Email envoyÃ©. Ouvrez le lien reÃ§u pour dÃ©finir votre mot de passe.");
     } catch (error) {
       console.error("Envoi du lien mot de passe impossible", error);
       setAuthMessage(userFacingError(error, "Envoi du lien impossible."));
@@ -952,10 +1023,10 @@ export function App() {
       await updateCurrentUserPassword(accountPassword);
       setAccountPassword("");
       setAccountPasswordConfirm("");
-      setNotice("Mot de passe mis à jour");
+      setNotice("Mot de passe mis Ã  jour");
     } catch (error) {
-      console.error("Mise à jour mot de passe impossible", error);
-      setNotice(userFacingError(error, "Mot de passe impossible à modifier"));
+      console.error("Mise Ã  jour mot de passe impossible", error);
+      setNotice(userFacingError(error, "Mot de passe impossible Ã  modifier"));
     } finally {
       setAccountBusy(false);
       window.setTimeout(() => setNotice(""), 2200);
@@ -975,10 +1046,10 @@ export function App() {
       setInviteEmail("");
       setDraftClient(null);
       setView("dashboard");
-      setNotice("Compte supprimé");
+      setNotice("Compte supprimÃ©");
     } catch (error) {
       console.error("Suppression du compte impossible", error);
-      setNotice(userFacingError(error, "Compte impossible à supprimer"));
+      setNotice(userFacingError(error, "Compte impossible Ã  supprimer"));
     } finally {
       setAccountBusy(false);
       window.setTimeout(() => setNotice(""), 2200);
@@ -998,8 +1069,8 @@ export function App() {
       setDraftClient(null);
       setView("dashboard");
     } catch (error) {
-      console.error("Déconnexion impossible", error);
-      setNotice("Déconnexion indisponible");
+      console.error("DÃ©connexion impossible", error);
+      setNotice("DÃ©connexion indisponible");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
@@ -1011,7 +1082,7 @@ export function App() {
     try {
       const invitation = await createTeamInvitation(workspace, inviteEmail, inviteRole);
       setInviteEmail("");
-      setNotice(`Invitation envoyée à ${invitation.email}`);
+      setNotice(`Invitation envoyÃ©e Ã  ${invitation.email}`);
       await refreshTeam();
     } catch (error) {
       console.error("Invitation impossible", error);
@@ -1024,12 +1095,12 @@ export function App() {
 
   async function revokeInvitation(invitation: TeamInvitation) {
     if (!workspace || !canManageTeam || teamBusy) return;
-    if (!confirmDestructiveAction(`Supprimer l'invitation envoyée à ${invitation.email} ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer l'invitation envoyÃ©e Ã  ${invitation.email} ?`)) return;
     setTeamBusy(true);
     try {
       await deleteTeamInvitation(workspace, invitation.id);
       await refreshTeam();
-      setNotice("Invitation supprimée");
+      setNotice("Invitation supprimÃ©e");
     } catch (error) {
       console.error("Suppression invitation impossible", error);
       setNotice(userFacingError(error, "Suppression impossible"));
@@ -1045,7 +1116,7 @@ export function App() {
     try {
       await updateTeamMemberRole(workspace, member.id, role);
       await refreshTeam();
-      setNotice("Droits mis à jour");
+      setNotice("Droits mis Ã  jour");
     } catch (error) {
       console.error("Modification droits impossible", error);
       setNotice(userFacingError(error, "Modification impossible"));
@@ -1062,9 +1133,9 @@ export function App() {
     try {
       await removeTeamMember(workspace, member.id);
       await refreshTeam();
-      setNotice("Employé retiré");
+      setNotice("EmployÃ© retirÃ©");
     } catch (error) {
-      console.error("Retrait employé impossible", error);
+      console.error("Retrait employÃ© impossible", error);
       setNotice(userFacingError(error, "Retrait impossible"));
     } finally {
       setTeamBusy(false);
@@ -1088,10 +1159,10 @@ export function App() {
     if (view === "purchases") return "Achats fournisseurs";
     if (view === "suppliers") return "Fournisseurs";
     if (view === "clients") return "Dossiers clients";
-    if (view === "company") return "Informations société";
+    if (view === "company") return "Informations sociÃ©tÃ©";
     if (view === "archives") return "Archives annuelles";
     if (view === "superadmin") return "Superadmin";
-    return "Paramètres";
+    return "ParamÃ¨tres";
   }
 
   const documentMonthOptions = useMemo(() => {
@@ -1160,6 +1231,38 @@ export function App() {
       const value = totals(doc.lines).totalTtc;
       return sum + paymentSummary(doc, value).remainingAmount;
     }, 0);
+  const stockStats = data.catalog.reduce(
+    (acc, item) => {
+      if (!item.trackStock) return acc;
+      acc.tracked += 1;
+      if (item.stockQuantity <= 0) acc.out += 1;
+      else if (item.stockQuantity <= item.stockMinimum) acc.low += 1;
+      return acc;
+    },
+    { tracked: 0, low: 0, out: 0 }
+  );
+  const stockWidgetItems = [...data.catalog]
+    .filter((item) => item.trackStock)
+    .sort((a, b) => {
+      const aAlert = a.stockQuantity <= 0 ? 0 : a.stockQuantity <= a.stockMinimum ? 1 : 2;
+      const bAlert = b.stockQuantity <= 0 ? 0 : b.stockQuantity <= b.stockMinimum ? 1 : 2;
+      return aAlert - bAlert || a.name.localeCompare(b.name, "fr");
+    })
+    .slice(0, 8);
+  const purchaseOrdersValue = activePurchaseOrders.reduce(
+    (sum, order) =>
+      sum +
+      order.lines.reduce((lineSum, line) => {
+        const ht = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+        return lineSum + ht * (1 + Math.max(0, Number(line.vatRate) || 0) / 100);
+      }, 0),
+    0
+  );
+  const purchaseInvoicesValue = activePurchaseInvoices.reduce((sum, invoice) => sum + purchaseInvoiceTotals(invoice).totalTtc, 0);
+  const accountingExpenseValue = activeExpenses.reduce((sum, expense) => {
+    const ht = Math.max(0, Number(expense.amountHt) || 0);
+    return sum + ht * (1 + Math.max(0, Number(expense.vatRate) || 0) / 100);
+  }, 0);
   const dueDocuments = activeDocuments
     .filter((doc) => doc.type === "invoice" && doc.dueDate && doc.status !== "paid")
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
@@ -1167,7 +1270,7 @@ export function App() {
 
   async function createClient() {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return;
     }
     const client = buildClient(formatBusinessNumber("client", data.counters.client || 1), "Nouveau client");
@@ -1176,9 +1279,28 @@ export function App() {
     setView("clients");
   }
 
+  async function createSubClient(parent: Client) {
+    if (!canEditOperations) {
+      showPermissionNotice("Votre accÃƒÂ¨s est en lecture seule.");
+      return;
+    }
+    const reserved = await reserveNumber("client", data);
+    const client = {
+      ...buildClient(reserved.number, "Nouveau sous-client"),
+      parentId: parent.id,
+      type: parent.type,
+      address: parent.address,
+      postalCode: parent.postalCode,
+      city: parent.city,
+    };
+    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Sous-client crÃƒÂ©ÃƒÂ©");
+    setSelectedClientId(client.id);
+    setView("clients");
+  }
+
   async function createDocument(type: DocumentType = "quote", clientId?: string) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return;
     }
     const withClient = clientId && data.clients.some((client) => client.id === clientId) ? { data, clientId } : await ensureClient(data);
@@ -1210,7 +1332,7 @@ export function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} créé`);
+    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} crÃ©Ã©`);
     setSelectedId(doc.id);
     setSelectedClientId(withClient.clientId);
     setDocumentBackView(clientId ? "clients" : "documents");
@@ -1220,7 +1342,7 @@ export function App() {
   async function convertDocument(source: BusinessDocument, type: DocumentType) {
     if (!canConvertDocument(source, type)) {
       showPermissionNotice(
-        isLockedBillingDocument(source) ? "Ce document de facturation est verrouillé." : "Votre accès est en lecture seule."
+        isLockedBillingDocument(source) ? "Ce document de facturation est verrouillÃ©." : "Votre accÃ¨s est en lecture seule."
       );
       return;
     }
@@ -1279,8 +1401,8 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le modifier."
-          : "Votre accès est en lecture seule."
+          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour le modifier."
+          : "Votre accÃ¨s est en lecture seule."
       );
       return;
     }
@@ -1299,11 +1421,11 @@ export function App() {
 
   async function updateDocumentPayment(doc: BusinessDocument) {
     if (!canEditOperations || doc.type !== "invoice") {
-      showPermissionNotice("Encaissement réservé aux factures.");
+      showPermissionNotice("Encaissement rÃ©servÃ© aux factures.");
       return;
     }
     const updated = withPaymentStatus({ ...doc, updatedAt: new Date().toISOString() });
-    await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }, "Paiement enregistré");
+    await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }, "Paiement enregistrÃ©");
   }
 
   async function advanceStatus(doc: BusinessDocument) {
@@ -1328,8 +1450,8 @@ export function App() {
     if (!canModifyDocument(source)) {
       showPermissionNotice(
         isLockedBillingDocument(source)
-          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le dupliquer."
-          : "Votre accès est en lecture seule."
+          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour le dupliquer."
+          : "Votre accÃ¨s est en lecture seule."
       );
       return;
     }
@@ -1358,7 +1480,7 @@ export function App() {
 
   async function restorePreviousDocument(doc: BusinessDocument) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return;
     }
     const lastHistory = doc.history[doc.history.length - 1];
@@ -1373,7 +1495,7 @@ export function App() {
     await deleteAttachmentsExcept(doc, restored.attachments);
     await persist(
       { ...data, catalog: nextCatalog, documents: data.documents.map((item) => (item.id === doc.id ? restored : item)) },
-      `${labels[lastHistory.fromType]} ${lastHistory.fromNumber} restauré`
+      `${labels[lastHistory.fromType]} ${lastHistory.fromNumber} restaurÃ©`
     );
     setSelectedId(restored.id);
     setView("documentDetail");
@@ -1381,11 +1503,11 @@ export function App() {
 
   async function deleteDocument(doc: BusinessDocument) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return;
     }
     if (isLockedBillingDocument(doc)) {
-      showPermissionNotice("Ce document de facturation est verrouillé. Revenez au document précédent avant de le supprimer.");
+      showPermissionNotice("Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent avant de le supprimer.");
       return;
     }
     if (!confirmDestructiveAction(`Supprimer ${labels[doc.type].toLowerCase()} ${doc.number} ?`)) return;
@@ -1393,8 +1515,8 @@ export function App() {
     const shouldRestoreOrigin = Boolean(
       lastHistory &&
         (await requestChoiceConfirmation(
-          "Régénérer l'origine",
-          `Voulez-vous régénérer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`
+          "RÃ©gÃ©nÃ©rer l'origine",
+          `Voulez-vous rÃ©gÃ©nÃ©rer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`
         ))
     );
     const restored = shouldRestoreOrigin && lastHistory ? restoreDocumentFromHistory(doc, lastHistory) : null;
@@ -1403,7 +1525,7 @@ export function App() {
     const nextDocs = data.documents.filter((item) => item.id !== doc.id);
     await persist(
       { ...data, documents: restored ? [restored, ...nextDocs] : nextDocs },
-      restored ? `${labels[restored.type]} ${restored.number} régénéré` : "Document supprimé"
+      restored ? `${labels[restored.type]} ${restored.number} rÃ©gÃ©nÃ©rÃ©` : "Document supprimÃ©"
     );
     setSelectedId(restored?.id || "");
     setView(restored ? "documentDetail" : "documents");
@@ -1413,8 +1535,8 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes."
-          : "Votre accès est en lecture seule."
+          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour modifier les piÃ¨ces jointes."
+          : "Votre accÃ¨s est en lecture seule."
       );
       return;
     }
@@ -1424,7 +1546,7 @@ export function App() {
       ? await Promise.all(result.attachments.map((attachment) => uploadRemoteAttachment(workspace, doc.id, attachment)))
       : result.attachments;
     await updateDocument({ ...doc, attachments: [...doc.attachments, ...attachments] });
-    setNotice(`${attachments.length} pièce(s) jointe(s) ajoutée(s)`);
+    setNotice(`${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`);
     window.setTimeout(() => setNotice(""), 1800);
   }
 
@@ -1437,9 +1559,9 @@ export function App() {
       const result = await api.openAttachment(attachment);
       if (result.opened) return;
     } catch (error) {
-      console.warn("Ouverture pièce jointe impossible", error);
+      console.warn("Ouverture piÃ¨ce jointe impossible", error);
     }
-    setNotice("Pièce jointe introuvable");
+    setNotice("PiÃ¨ce jointe introuvable");
     window.setTimeout(() => setNotice(""), 2200);
   }
 
@@ -1447,12 +1569,12 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes."
-          : "Votre accès est en lecture seule."
+          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour modifier les piÃ¨ces jointes."
+          : "Votre accÃ¨s est en lecture seule."
       );
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
     try {
       if (workspace) {
         await deleteRemoteAttachment(attachment);
@@ -1460,10 +1582,10 @@ export function App() {
         await api.deleteAttachment(attachment);
       }
     } catch (error) {
-      console.warn("Suppression pièce jointe impossible", error);
+      console.warn("Suppression piÃ¨ce jointe impossible", error);
     } finally {
       await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
-      setNotice("Pièce jointe supprimée");
+      setNotice("PiÃ¨ce jointe supprimÃ©e");
       window.setTimeout(() => setNotice(""), 2200);
     }
   }
@@ -1479,7 +1601,7 @@ export function App() {
     const client = data.clients.find((item) => item.id === doc.clientId);
     let email = client?.email?.trim() || "";
     if (!email) {
-      const entered = window.prompt("Email du client à ajouter pour cet envoi", email);
+      const entered = window.prompt("Email du client Ã  ajouter pour cet envoi", email);
       if (!entered) return;
       email = entered.trim();
       if (client) {
@@ -1489,7 +1611,7 @@ export function App() {
         }
         await persist(
           { ...data, clients: data.clients.map((item) => (item.id === client.id ? { ...item, email } : item)) },
-          "Email client ajouté"
+          "Email client ajoutÃ©"
         );
       }
     }
@@ -1502,31 +1624,31 @@ export function App() {
       subject: `${labels[doc.type]} ${doc.number}${doc.projectName ? ` - ${doc.projectName}` : ""}`,
       body: "",
     });
-    setNotice(result.opened && !result.fallback ? "Email prêt avec PDF joint" : "Impossible de joindre le PDF au mail");
+    setNotice(result.opened && !result.fallback ? "Email prÃªt avec PDF joint" : "Impossible de joindre le PDF au mail");
     window.setTimeout(() => setNotice(""), result.fallback ? 4200 : 1800);
   }
 
   async function sendPaymentReminder(doc: BusinessDocument, draft: ReminderDraft) {
     if (!canEditOperations || doc.type !== "invoice") {
-      showPermissionNotice("Relance réservée aux factures.");
-      return { success: false, message: "Relance réservée aux factures." };
+      showPermissionNotice("Relance rÃ©servÃ©e aux factures.");
+      return { success: false, message: "Relance rÃ©servÃ©e aux factures." };
     }
 
     const invoice = withPaymentStatus(doc);
     const summary = paymentSummary(invoice);
     if (summary.remainingAmount <= 0.005) {
-      setNotice("Aucun reste dû à relancer");
+      setNotice("Aucun reste dÃ» Ã  relancer");
       window.setTimeout(() => setNotice(""), 2200);
-      return { success: false, message: "Aucun reste dû à relancer." };
+      return { success: false, message: "Aucun reste dÃ» Ã  relancer." };
     }
 
     const client = data.clients.find((item) => item.id === invoice.clientId);
     let email = client?.email?.trim() || "";
     if (!email) {
-      const entered = window.prompt("Email du client à utiliser pour cette relance", email);
-      if (!entered) return { success: false, message: "Relance annulée : email client absent." };
+      const entered = window.prompt("Email du client Ã  utiliser pour cette relance", email);
+      if (!entered) return { success: false, message: "Relance annulÃ©e : email client absent." };
       email = entered.trim();
-      if (!email) return { success: false, message: "Relance annulée : email client absent." };
+      if (!email) return { success: false, message: "Relance annulÃ©e : email client absent." };
     }
 
     const clientForEmail = client ? { ...client, email } : undefined;
@@ -1540,22 +1662,22 @@ export function App() {
       result = await api.emailPdf({ html, defaultPath: name, to: email, subject, body });
     } catch (error) {
       console.error("Relance email impossible", error);
-      setNotice("Relance impossible : génération PDF échouée");
+      setNotice("Relance impossible : gÃ©nÃ©ration PDF Ã©chouÃ©e");
       window.setTimeout(() => setNotice(""), 4200);
-      return { success: false, message: "Relance impossible : génération PDF échouée." };
+      return { success: false, message: "Relance impossible : gÃ©nÃ©ration PDF Ã©chouÃ©e." };
     }
 
     if (!result.opened || result.fallback) {
-      setNotice("Relance non envoyée : PDF joint indisponible");
+      setNotice("Relance non envoyÃ©e : PDF joint indisponible");
       window.setTimeout(() => setNotice(""), 4200);
-      return { success: false, message: "Relance non enregistrée : PDF joint indisponible." };
+      return { success: false, message: "Relance non enregistrÃ©e : PDF joint indisponible." };
     }
 
     const reminder: PaymentReminder = {
       id: makeId("reminder"),
       sentAt: draft.sentAt || todayIso(),
       channel: "email",
-      note: draft.note.trim() || `Relance email - reste dû ${currency(summary.remainingAmount)}`,
+      note: draft.note.trim() || `Relance email - reste dÃ» ${currency(summary.remainingAmount)}`,
     };
     const updated = withPaymentStatus({
       ...invoice,
@@ -1564,16 +1686,16 @@ export function App() {
     });
     await persist(
       { ...data, clients: nextClients, documents: data.documents.map((item) => (item.id === invoice.id ? updated : item)) },
-      "Relance email enregistrée"
+      "Relance email enregistrÃ©e"
     );
-    setNotice("Relance prête avec PDF joint");
+    setNotice("Relance prÃªte avec PDF joint");
     window.setTimeout(() => setNotice(""), 2200);
-    return { success: true, message: "Relance prête avec PDF joint." };
+    return { success: true, message: "Relance prÃªte avec PDF joint." };
   }
 
   async function updateClient(client: Client) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return false;
     }
     const exists = data.clients.some((item) => item.id === client.id);
@@ -1584,29 +1706,34 @@ export function App() {
           counters: { ...data.counters, client: Math.max(data.counters.client || 1, (data.counters.client || 1) + 1) },
           clients: [client, ...data.clients],
         };
-    const saved = await persist(nextData, exists ? "Client enregistré" : "Client créé");
+    const saved = await persist(nextData, exists ? "Client enregistrÃ©" : "Client crÃ©Ã©");
     if (saved && draftClient?.id === client.id) setDraftClient(null);
     return saved;
   }
 
   async function deleteClient(client: Client) {
     if (draftClient?.id === client.id) {
-      if (!confirmDestructiveAction("Abandonner ce nouveau client non enregistré ?")) return;
+      if (!confirmDestructiveAction("Abandonner ce nouveau client non enregistrÃ© ?")) return;
       setDraftClient(null);
       setSelectedClientId(data.clients[0]?.id || "");
       return;
     }
     if (!canDeleteClients) {
-      showPermissionNotice("Suppression des clients réservée aux administrateurs.");
+      showPermissionNotice("Suppression des clients rÃ©servÃ©e aux administrateurs.");
       return;
     }
     const used = data.documents.some((doc) => doc.clientId === client.id);
-    if (used) {
-      setNotice("Client utilisé dans un document");
+    const hasSubClients = data.clients.some((entry) => entry.parentId === client.id);
+    if (hasSubClients) {
+      setNotice("Client utilise comme dossier parent");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer le client « ${client.name || client.number} » ?`)) return;
-    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimé");
+    if (used) {
+      setNotice("Client utilisÃ© dans un document");
+      return;
+    }
+    if (!confirmDestructiveAction(`Supprimer le client Â« ${client.name || client.number} Â» ?`)) return;
+    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimÃ©");
     if (selectedClientId === client.id) setSelectedClientId("");
   }
 
@@ -1638,7 +1765,7 @@ export function App() {
       showPermissionNotice();
       return;
     }
-    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Élément ajouté au catalogue");
+    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Ã‰lÃ©ment ajoutÃ© au catalogue");
     setView("catalog");
   }
 
@@ -1656,22 +1783,22 @@ export function App() {
       return;
     }
     if (data.purchaseInvoices.some((invoice) => invoice.lines.some((line) => line.catalogItemId === item.id))) {
-      showPermissionNotice("Cet article est utilisé par une facture d’achat et ne peut pas être supprimé.");
+      showPermissionNotice("Cet article est utilisÃ© par une facture dâ€™achat et ne peut pas Ãªtre supprimÃ©.");
       return;
     }
     if (data.purchaseOrders.some((order) => order.lines.some((line) => line.catalogItemId === item.id))) {
-      showPermissionNotice("Cet article est utilisé par une commande fournisseur et ne peut pas être supprimé.");
+      showPermissionNotice("Cet article est utilisÃ© par une commande fournisseur et ne peut pas Ãªtre supprimÃ©.");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer « ${item.name || "cet élément"} » du catalogue ?`)) return;
-    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Élément supprimé du catalogue");
+    if (!confirmDestructiveAction(`Supprimer Â« ${item.name || "cet Ã©lÃ©ment"} Â» du catalogue ?`)) return;
+    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Ã‰lÃ©ment supprimÃ© du catalogue");
   }
 
   async function copyCompany() {
     const text = companyText(data.company);
     try {
       await navigator.clipboard.writeText(text);
-      setNotice("Informations société copiées");
+      setNotice("Informations sociÃ©tÃ© copiÃ©es");
     } catch {
       const textarea = document.createElement("textarea");
       textarea.value = text;
@@ -1679,14 +1806,14 @@ export function App() {
       textarea.select();
       document.execCommand("copy");
       textarea.remove();
-      setNotice("Informations société copiées");
+      setNotice("Informations sociÃ©tÃ© copiÃ©es");
     }
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function emailCompany() {
     await api.openEmail({
-      subject: `Informations société - ${data.company.name}`,
+      subject: `Informations sociÃ©tÃ© - ${data.company.name}`,
       body: companyText(data.company),
     });
   }
@@ -1705,7 +1832,7 @@ export function App() {
       defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.pdf`,
     });
     if (!result.canceled) {
-      setNotice("Livre de comptes PDF exporté");
+      setNotice("Livre de comptes PDF exportÃ©");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
@@ -1717,19 +1844,19 @@ export function App() {
       defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.xlsx`,
     });
     if (!result.canceled) {
-      setNotice("Livre de comptes Excel exporté");
+      setNotice("Livre de comptes Excel exportÃ©");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
 
   async function archiveYear(year: number) {
     if (!canManageCompany) {
-      showPermissionNotice("L’archivage annuel est réservé aux administrateurs.");
+      showPermissionNotice("Lâ€™archivage annuel est rÃ©servÃ© aux administrateurs.");
       return false;
     }
     const currentYearValue = new Date().getFullYear();
     if (!Number.isFinite(year) || year >= currentYearValue) {
-      showPermissionNotice("Seule une année terminée peut être archivée.");
+      showPermissionNotice("Seule une annÃ©e terminÃ©e peut Ãªtre archivÃ©e.");
       return false;
     }
 
@@ -1739,13 +1866,13 @@ export function App() {
     const orders = data.purchaseOrders.filter((order) => !isArchived(order) && purchaseOrderYear(order) === year);
     const totalItems = documents.length + expenses.length + invoices.length + orders.length;
     if (!totalItems) {
-      showPermissionNotice(`Aucun élément actif trouvé pour ${year}.`);
+      showPermissionNotice(`Aucun Ã©lÃ©ment actif trouvÃ© pour ${year}.`);
       return false;
     }
 
     if (
       !confirmDestructiveAction(
-        `Archiver ${totalItems} élément(s) de ${year} ? Ils disparaîtront des vues actives, mais resteront consultables dans Archives et dans les comptes.`
+        `Archiver ${totalItems} Ã©lÃ©ment(s) de ${year} ? Ils disparaÃ®tront des vues actives, mais resteront consultables dans Archives et dans les comptes.`
       )
     ) {
       return false;
@@ -1754,11 +1881,11 @@ export function App() {
     const expected = `ARCHIVER ${year}`;
     const confirmed = await requestTypedConfirmation(
       "Confirmer l'archivage",
-      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
+      `DerniÃ¨re vÃ©rification : tapez exactement Â« ${expected} Â» pour confirmer.`,
       expected
     );
     if (!confirmed) {
-      showPermissionNotice("Archivage annulé : confirmation incorrecte.");
+      showPermissionNotice("Archivage annulÃ© : confirmation incorrecte.");
       return false;
     }
 
@@ -1780,35 +1907,35 @@ export function App() {
         !isArchived(order) && purchaseOrderYear(order) === year ? { ...order, archivedYear: year, archivedAt, updatedAt: archivedAt } : order
       ),
     });
-    const saved = await persist(next, `Année ${year} archivée`);
+    const saved = await persist(next, `AnnÃ©e ${year} archivÃ©e`);
     if (saved) setSelectedArchiveYear(year);
     return saved;
   }
 
   async function createExpense(expense: BusinessExpense) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return false;
     }
-    return persist({ ...data, expenses: [expense, ...data.expenses] }, "Dépense enregistrée");
+    return persist({ ...data, expenses: [expense, ...data.expenses] }, "DÃ©pense enregistrÃ©e");
   }
 
   async function deleteExpense(expense: BusinessExpense) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return;
     }
     if (expense.purchaseInvoiceId) {
-      showPermissionNotice("Cette dépense provient d’une facture d’achat. Annulez la validation depuis l’écran Achats.");
+      showPermissionNotice("Cette dÃ©pense provient dâ€™une facture dâ€™achat. Annulez la validation depuis lâ€™Ã©cran Achats.");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer la dépense « ${expense.description} » ?`)) return;
-    await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "Dépense supprimée");
+    if (!confirmDestructiveAction(`Supprimer la dÃ©pense Â« ${expense.description} Â» ?`)) return;
+    await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "DÃ©pense supprimÃ©e");
   }
 
   async function saveSupplier(supplier: Supplier) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return false;
     }
     const exists = data.suppliers.some((item) => item.id === supplier.id);
@@ -1825,38 +1952,64 @@ export function App() {
     );
     return persist(
       { ...data, suppliers, expenses, catalog, purchaseInvoices, purchaseOrders },
-      exists ? "Fournisseur mis à jour" : "Fournisseur créé"
+      exists ? "Fournisseur mis Ã  jour" : "Fournisseur crÃ©Ã©"
     );
   }
 
   async function deleteSupplier(supplier: Supplier) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accès est en lecture seule.");
+      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
       return false;
     }
     if (data.expenses.some((expense) => expense.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisé par une dépense et ne peut pas être supprimé.");
+      showPermissionNotice("Ce fournisseur est utilisÃ© par une dÃ©pense et ne peut pas Ãªtre supprimÃ©.");
       return false;
     }
     if (data.catalog.some((item) => item.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est lié à un article du catalogue et ne peut pas être supprimé.");
+      showPermissionNotice("Ce fournisseur est liÃ© Ã  un article du catalogue et ne peut pas Ãªtre supprimÃ©.");
       return false;
     }
     if (data.purchaseInvoices.some((invoice) => invoice.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisé par une facture d’achat et ne peut pas être supprimé.");
+      showPermissionNotice("Ce fournisseur est utilisÃ© par une facture dâ€™achat et ne peut pas Ãªtre supprimÃ©.");
       return false;
     }
     if (data.purchaseOrders.some((order) => order.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisé par une commande fournisseur et ne peut pas être supprimé.");
+      showPermissionNotice("Ce fournisseur est utilisÃ© par une commande fournisseur et ne peut pas Ãªtre supprimÃ©.");
       return false;
     }
-    if (!confirmDestructiveAction(`Supprimer le fournisseur « ${supplier.name} » ?`)) return false;
-    return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimé");
+    if (!confirmDestructiveAction(`Supprimer le fournisseur Â« ${supplier.name} Â» ?`)) return false;
+    return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimÃ©");
+  }
+
+  async function createSupplierCatalogItem(supplier: Supplier) {
+    if (!canManageCatalog) {
+      showPermissionNotice();
+      return;
+    }
+    const item: CatalogItem = {
+      ...emptyCatalogItem(data.company.defaultVatRate),
+      supplierId: supplier.id,
+      supplier: supplier.name,
+      trackStock: true,
+      unit: "u",
+      stockUnit: "u",
+    };
+    await persist({ ...data, catalog: [item, ...data.catalog] }, "Article fournisseur ajoutÃ©");
+  }
+
+  async function saveSupplierCatalogItem(item: CatalogItem) {
+    if (!canManageCatalog) {
+      showPermissionNotice();
+      return;
+    }
+    const supplier = data.suppliers.find((entry) => entry.id === item.supplierId);
+    const normalized = { ...item, supplier: supplier?.name || item.supplier, stockUnit: item.stockUnit || item.unit || "u" };
+    await persist({ ...data, catalog: data.catalog.map((entry) => (entry.id === item.id ? normalized : entry)) });
   }
 
   async function savePurchaseOrder(order: PurchaseOrder) {
     if (!canManageCatalog || order.status !== "draft") {
-      showPermissionNotice("La gestion des commandes fournisseur est réservée aux administrateurs.");
+      showPermissionNotice("La gestion des commandes fournisseur est rÃ©servÃ©e aux administrateurs.");
       return false;
     }
     const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
@@ -1865,7 +2018,7 @@ export function App() {
     const purchaseOrders = exists
       ? data.purchaseOrders.map((entry) => (entry.id === order.id ? normalized : entry))
       : [normalized, ...data.purchaseOrders];
-    return persist({ ...data, purchaseOrders }, exists ? "Commande mise à jour" : "Commande fournisseur créée");
+    return persist({ ...data, purchaseOrders }, exists ? "Commande mise Ã  jour" : "Commande fournisseur crÃ©Ã©e");
   }
 
   async function emailPurchaseOrder(order: PurchaseOrder) {
@@ -1879,19 +2032,24 @@ export function App() {
     if (!email) {
       const entered = window.prompt(`Adresse email de ${supplier.name}`, "");
       if (!entered?.trim()) {
-        showPermissionNotice("L’adresse email du fournisseur est nécessaire pour envoyer la commande.");
+        showPermissionNotice("Lâ€™adresse email du fournisseur est nÃ©cessaire pour envoyer la commande.");
         return false;
       }
       email = entered.trim();
       supplier = { ...supplier, email, updatedAt: new Date().toISOString() };
     }
-    const sent: PurchaseOrder = { ...order, supplier: supplier.name, status: "sent", updatedAt: new Date().toISOString() };
+    const sent: PurchaseOrder = {
+      ...order,
+      supplier: supplier.name,
+      status: order.status === "received" ? "received" : "sent",
+      updatedAt: new Date().toISOString(),
+    };
     const exists = data.purchaseOrders.some((entry) => entry.id === sent.id);
     const purchaseOrders = exists
       ? data.purchaseOrders.map((entry) => (entry.id === sent.id ? sent : entry))
       : [sent, ...data.purchaseOrders];
     const suppliers = data.suppliers.map((entry) => (entry.id === supplier.id ? supplier : entry));
-    const saved = await persist({ ...data, suppliers, purchaseOrders }, "Commande prête à être envoyée");
+    const saved = await persist({ ...data, suppliers, purchaseOrders }, "Commande prÃªte Ã  Ãªtre envoyÃ©e");
     if (!saved) return false;
     try {
       const result = await api.emailPdf({
@@ -1901,19 +2059,50 @@ export function App() {
         subject: `Bon de commande ${sent.number} - ${data.company.name || "Devix"}`,
         body: `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${sent.number}.\n\nCordialement,\n${data.company.name || ""}`,
       });
-      setNotice(result.opened && !result.fallback ? "Email prêt avec le bon de commande joint" : "Email préparé");
+      setNotice(result.opened && !result.fallback ? "Email prÃªt avec le bon de commande joint" : "Email prÃ©parÃ©");
       window.setTimeout(() => setNotice(""), 2200);
       return result.opened;
     } catch (error) {
       console.error("Envoi du bon de commande impossible", error);
-      setNotice("Impossible d’ouvrir l’email préparé");
+      setNotice("Impossible dâ€™ouvrir lâ€™email prÃ©parÃ©");
       window.setTimeout(() => setNotice(""), 2200);
       return false;
     }
   }
 
+  async function receivePurchaseOrder(order: PurchaseOrder) {
+    if (!canManageCatalog || order.status !== "draft") {
+      showPermissionNotice("La rÃ©ception de stock est rÃ©servÃ©e aux administrateurs.");
+      return false;
+    }
+    const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
+    const normalized: PurchaseOrder = {
+      ...order,
+      supplier: supplier?.name || order.supplier.trim(),
+      status: "received",
+      receivedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const exists = data.purchaseOrders.some((entry) => entry.id === normalized.id);
+    const purchaseOrders = exists
+      ? data.purchaseOrders.map((entry) => (entry.id === normalized.id ? normalized : entry))
+      : [normalized, ...data.purchaseOrders];
+    const supplierCatalog = data.catalog.map((item) => {
+      const line = order.lines.find((entry) => entry.catalogItemId === item.id);
+      return line ? { ...item, supplierId: order.supplierId, supplier: normalized.supplier, purchasePrice: line.unitPrice } : item;
+    });
+    return persist(
+      {
+        ...data,
+        purchaseOrders,
+        catalog: applyPurchaseOrderStockImpact(supplierCatalog, normalized, "receive"),
+      },
+      "EntrÃ©e en stock enregistrÃ©e"
+    );
+  }
+
   async function createInvoiceFromPurchaseOrder(order: PurchaseOrder) {
-    if (!canManageCatalog || order.status !== "sent" || order.invoiceId) return false;
+    if (!canManageCatalog || !["sent", "received"].includes(order.status) || order.invoiceId) return false;
     const now = new Date().toISOString();
     const invoice: PurchaseInvoice = {
       id: makeId("purchase"),
@@ -1928,11 +2117,17 @@ export function App() {
       lines: order.lines.map((line) => ({ ...line, id: makeId("purchase-line") })),
       attachments: [...order.attachments],
       purchaseOrderId: order.id,
-      sourceOrder: { ...order, status: "sent", receivedAt: undefined, invoiceId: undefined },
+      sourceOrder: { ...order, invoiceId: undefined },
       createdAt: now,
       updatedAt: now,
     };
-    const receivedOrder: PurchaseOrder = { ...order, status: "received", receivedAt: now, invoiceId: invoice.id, updatedAt: now };
+    const receivedOrder: PurchaseOrder = {
+      ...order,
+      status: "received",
+      receivedAt: order.receivedAt || now,
+      invoiceId: invoice.id,
+      updatedAt: now,
+    };
     const supplierCatalog = data.catalog.map((item) => {
       const line = order.lines.find((entry) => entry.catalogItemId === item.id);
       return line ? { ...item, supplierId: order.supplierId, supplier: order.supplier, purchasePrice: line.unitPrice } : item;
@@ -1942,9 +2137,9 @@ export function App() {
         ...data,
         purchaseInvoices: [invoice, ...data.purchaseInvoices],
         purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
-        catalog: applyPurchaseOrderStockImpact(supplierCatalog, receivedOrder, "receive"),
+        catalog: order.status === "received" ? supplierCatalog : applyPurchaseOrderStockImpact(supplierCatalog, receivedOrder, "receive"),
       },
-      "Commande transformée en facture : stock mis à jour"
+      "Commande transformÃ©e en facture : stock mis Ã  jour"
     );
   }
 
@@ -1969,7 +2164,7 @@ export function App() {
             : entry
         ),
       },
-      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
+      `${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`
     );
   }
 
@@ -1986,7 +2181,7 @@ export function App() {
             : entry
         ),
       },
-      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
+      `${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`
     );
   }
 
@@ -1995,12 +2190,12 @@ export function App() {
       if (workspace) await deleteRemoteAttachment(attachment);
       else await api.deleteAttachment(attachment);
     } catch (error) {
-      console.warn("Suppression pièce jointe impossible", error);
+      console.warn("Suppression piÃ¨ce jointe impossible", error);
     }
   }
 
   async function removePurchaseOrderAttachment(order: PurchaseOrder, attachment: DocumentAttachment) {
-    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
     await deletePurchaseAttachmentFile(attachment);
     await persist(
       {
@@ -2011,12 +2206,12 @@ export function App() {
             : entry
         ),
       },
-      "Pièce jointe supprimée"
+      "PiÃ¨ce jointe supprimÃ©e"
     );
   }
 
   async function removePurchaseInvoiceAttachment(invoice: PurchaseInvoice, attachment: DocumentAttachment) {
-    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
     await deletePurchaseAttachmentFile(attachment);
     await persist(
       {
@@ -2031,18 +2226,18 @@ export function App() {
             : entry
         ),
       },
-      "Pièce jointe supprimée"
+      "PiÃ¨ce jointe supprimÃ©e"
     );
   }
 
   async function deletePurchaseOrder(order: PurchaseOrder) {
     if (!canManageCatalog) return false;
     if (order.invoiceId) {
-      showPermissionNotice("Supprimez d’abord la facture associée à cette commande.");
+      showPermissionNotice("Supprimez dâ€™abord la facture associÃ©e Ã  cette commande.");
       return false;
     }
-    const impact = order.status === "received" ? " Le stock sera corrigé." : "";
-    if (!confirmDestructiveAction(`Supprimer la commande « ${order.number} » ?${impact}`)) return false;
+    const impact = order.status === "received" ? " Le stock sera corrigÃ©." : "";
+    if (!confirmDestructiveAction(`Supprimer la commande Â« ${order.number} Â» ?${impact}`)) return false;
     await Promise.all(order.attachments.map(deletePurchaseAttachmentFile));
     return persist(
       {
@@ -2050,7 +2245,7 @@ export function App() {
         purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
         catalog: order.status === "received" ? applyPurchaseOrderStockImpact(data.catalog, order, "cancel") : data.catalog,
       },
-      "Commande fournisseur supprimée"
+      "Commande fournisseur supprimÃ©e"
     );
   }
 
@@ -2060,13 +2255,13 @@ export function App() {
       html: renderPurchaseOrderHtml(order, supplier, data.company),
       defaultPath: `${sanitizeFileName(order.number)}.pdf`,
     });
-    if (!result.canceled) setNotice("Bon de commande fournisseur exporté");
+    if (!result.canceled) setNotice("Bon de commande fournisseur exportÃ©");
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function savePurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog || invoice.status === "posted") {
-      showPermissionNotice("La gestion des achats et du stock est réservée aux administrateurs.");
+      showPermissionNotice("La gestion des achats et du stock est rÃ©servÃ©e aux administrateurs.");
       return false;
     }
     const supplier = data.suppliers.find((entry) => entry.id === invoice.supplierId);
@@ -2075,12 +2270,12 @@ export function App() {
     const purchaseInvoices = exists
       ? data.purchaseInvoices.map((entry) => (entry.id === invoice.id ? normalized : entry))
       : [normalized, ...data.purchaseInvoices];
-    return persist({ ...data, purchaseInvoices }, exists ? "Facture d’achat mise à jour" : "Facture d’achat créée");
+    return persist({ ...data, purchaseInvoices }, exists ? "Facture dâ€™achat mise Ã  jour" : "Facture dâ€™achat crÃ©Ã©e");
   }
 
   async function postPurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("La validation des achats et du stock est réservée aux administrateurs.");
+      showPermissionNotice("La validation des achats et du stock est rÃ©servÃ©e aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
@@ -2089,7 +2284,7 @@ export function App() {
     const normalized = { ...invoice, supplier: supplier?.name || invoice.supplier.trim() };
     const totals = purchaseInvoiceTotals(normalized);
     if (!normalized.supplierId || !normalized.reference.trim() || totals.totalHt <= 0 || !normalized.lines.length) {
-      showPermissionNotice("Renseignez le fournisseur, la référence et au moins une ligne avec un montant positif.");
+      showPermissionNotice("Renseignez le fournisseur, la rÃ©fÃ©rence et au moins une ligne avec un montant positif.");
       return false;
     }
     const duplicate = data.purchaseInvoices.some(
@@ -2099,7 +2294,7 @@ export function App() {
         entry.reference.trim().toLocaleLowerCase("fr") === invoice.reference.trim().toLocaleLowerCase("fr")
     );
     if (duplicate) {
-      showPermissionNotice("Une facture de ce fournisseur porte déjà cette référence.");
+      showPermissionNotice("Une facture de ce fournisseur porte dÃ©jÃ  cette rÃ©fÃ©rence.");
       return false;
     }
     const expense = purchaseInvoiceExpense(normalized);
@@ -2120,18 +2315,18 @@ export function App() {
         expenses: [expense, ...data.expenses.filter((entry) => entry.purchaseInvoiceId !== posted.id)],
         catalog: posted.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, posted, "post"),
       },
-      "Facture validée : comptes et stock mis à jour"
+      "Facture validÃ©e : comptes et stock mis Ã  jour"
     );
   }
 
   async function cancelPurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("L’annulation d’un achat est réservée aux administrateurs.");
+      showPermissionNotice("Lâ€™annulation dâ€™un achat est rÃ©servÃ©e aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
     if (!stored || stored.status !== "posted") return false;
-    if (!confirmDestructiveAction(`Annuler la validation de la facture « ${stored.reference} » ? Le stock et les comptes seront corrigés.`))
+    if (!confirmDestructiveAction(`Annuler la validation de la facture Â« ${stored.reference} Â» ? Le stock et les comptes seront corrigÃ©s.`))
       return false;
     const draft: PurchaseInvoice = {
       ...stored,
@@ -2147,25 +2342,25 @@ export function App() {
         expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
         catalog: stored.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel"),
       },
-      "Validation annulée : comptes et stock corrigés"
+      "Validation annulÃ©e : comptes et stock corrigÃ©s"
     );
   }
 
   async function deletePurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("La suppression des achats est réservée aux administrateurs.");
+      showPermissionNotice("La suppression des achats est rÃ©servÃ©e aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
     if (!stored) return false;
     if (stored.sourceOrder) {
       showPermissionNotice(
-        "Cette facture provient d’un bon de commande. Utilisez « Revenir au bon de commande » pour conserver l’historique."
+        "Cette facture provient dâ€™un bon de commande. Utilisez Â« Revenir au bon de commande Â» pour conserver lâ€™historique."
       );
       return false;
     }
-    const impact = stored.status === "posted" ? " Le stock et les comptes seront corrigés." : "";
-    if (!confirmDestructiveAction(`Supprimer la facture d’achat « ${stored.reference || "sans référence"} » ?${impact}`)) return false;
+    const impact = stored.status === "posted" ? " Le stock et les comptes seront corrigÃ©s." : "";
+    if (!confirmDestructiveAction(`Supprimer la facture dâ€™achat Â« ${stored.reference || "sans rÃ©fÃ©rence"} Â» ?${impact}`)) return false;
     await Promise.all(stored.attachments.map(deletePurchaseAttachmentFile));
     return persist(
       {
@@ -2180,7 +2375,7 @@ export function App() {
             ? applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel")
             : data.catalog,
       },
-      "Facture d’achat supprimée"
+      "Facture dâ€™achat supprimÃ©e"
     );
   }
 
@@ -2190,7 +2385,7 @@ export function App() {
     if (!stored?.sourceOrder) return false;
     if (
       !confirmDestructiveAction(
-        `Revenir au bon de commande ${stored.sourceOrder.number} ? La facture sera retirée et le stock sera corrigé.`
+        `Revenir au bon de commande ${stored.sourceOrder.number} ? La facture sera retirÃ©e et le stock sera corrigÃ©.`
       )
     )
       return false;
@@ -2210,7 +2405,7 @@ export function App() {
         expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
         catalog: applyPurchaseOrderStockImpact(data.catalog, restored, "cancel"),
       },
-      `Bon de commande ${restored.number} restauré`
+      `Bon de commande ${restored.number} restaurÃ©`
     );
   }
 
@@ -2263,7 +2458,7 @@ export function App() {
       return;
     }
     const logoDataUrl = await readImageAsDataUrl(file);
-    await persist({ ...data, company: { ...data.company, logoDataUrl } }, "Logo mis à jour");
+    await persist({ ...data, company: { ...data.company, logoDataUrl } }, "Logo mis Ã  jour");
   }
 
   async function removeCompanyLogo() {
@@ -2272,10 +2467,201 @@ export function App() {
       return;
     }
     if (!confirmDestructiveAction("Retirer le logo de l'entreprise ?")) return;
-    await persist({ ...data, company: { ...data.company, logoDataUrl: "" } }, "Logo supprimé");
+    await persist({ ...data, company: { ...data.company, logoDataUrl: "" } }, "Logo supprimÃ©");
   }
 
   const activeTheme = getTheme(data.company.themeId);
+
+  function toggleDashboardWidget(id: DashboardWidgetId) {
+    setDashboardWidgets((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
+  }
+
+  function moveDashboardWidget(id: DashboardWidgetId, direction: -1 | 1) {
+    setDashboardWidgets((current) => {
+      const index = current.indexOf(id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  function renderDashboardWidget(id: DashboardWidgetId) {
+    if (id === "quotes") {
+      return (
+        <div className="kpi dashboardWidget" key={id}>
+          <FileText />
+          <span>Devis en portefeuille</span>
+          <strong>{currency(dashboardTotals.quotes)}</strong>
+        </div>
+      );
+    }
+    if (id === "orders") {
+      return (
+        <div className="kpi dashboardWidget" key={id}>
+          <PackageCheck />
+          <span>Commandes</span>
+          <strong>{currency(dashboardTotals.orders)}</strong>
+        </div>
+      );
+    }
+    if (id === "invoices") {
+      return (
+        <div className="kpi dashboardWidget" key={id}>
+          <ReceiptText />
+          <span>Factures</span>
+          <strong>{currency(dashboardTotals.invoices)}</strong>
+        </div>
+      );
+    }
+    if (id === "pending") {
+      return (
+        <div className="kpi dashboardWidget" key={id}>
+          <FileCheck2 />
+          <span>A encaisser</span>
+          <strong>{currency(pendingValue)}</strong>
+        </div>
+      );
+    }
+    if (id === "status") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Suivi des affaires</h2>
+          </div>
+          <div className="statusGrid">
+            <StatusPill status="draft" count={statusCounts.draft} />
+            <StatusPill status="partial" count={statusCounts.partial} />
+            <StatusPill status="paid" count={statusCounts.paid} />
+          </div>
+        </div>
+      );
+    }
+    if (id === "due") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Echeances</h2>
+          </div>
+          <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
+        </div>
+      );
+    }
+    if (id === "recent") {
+      return (
+        <div className="panel wide dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Activite recente</h2>
+            {canEditOperations && (
+              <button onClick={() => createDocument("quote")}>
+                <Plus size={17} /> Creer un devis
+              </button>
+            )}
+          </div>
+          <DocumentRows docs={recentDocuments.slice(0, 8)} clients={data.clients} onOpen={openDocument} />
+        </div>
+      );
+    }
+    if (id === "stock") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Articles et stock</h2>
+            <button className="ghost" onClick={() => setView("catalog")}>Ouvrir</button>
+          </div>
+          <div className="dashboardMiniGrid">
+            <span><strong>{stockStats.tracked}</strong> suivis</span>
+            <span><strong>{stockStats.low}</strong> stock bas</span>
+            <span><strong>{stockStats.out}</strong> ruptures</span>
+          </div>
+          <div className="dashboardStockList">
+            {stockWidgetItems.map((item) => (
+              <button key={item.id} type="button" onClick={() => setView("catalog")}>
+                <strong>{item.name || "Article sans nom"}</strong>
+                <span>
+                  {item.stockQuantity} {item.stockUnit || item.unit || "u"}
+                </span>
+                <em className={item.stockQuantity <= 0 ? "danger" : item.stockQuantity <= item.stockMinimum ? "warning" : "success"}>
+                  {item.stockQuantity <= 0 ? "Rupture" : item.stockQuantity <= item.stockMinimum ? "Bas" : "OK"}
+                </em>
+              </button>
+            ))}
+            {!stockWidgetItems.length && <div className="emptyRows compactEmpty">Aucun article suivi.</div>}
+          </div>
+        </div>
+      );
+    }
+    if (id === "clients") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Clients</h2>
+            <button className="ghost" onClick={() => setView("clients")}>Ouvrir</button>
+          </div>
+          <div className="dashboardMiniGrid">
+            <span><strong>{data.clients.length}</strong> clients</span>
+            <span><strong>{data.clients.filter((client) => client.parentId).length}</strong> sous-clients</span>
+          </div>
+        </div>
+      );
+    }
+    if (id === "purchases") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Achats</h2>
+            <button className="ghost" onClick={() => setView("purchases")}>Ouvrir</button>
+          </div>
+          <div className="dashboardMiniGrid">
+            <span><strong>{activePurchaseOrders.length}</strong> commandes</span>
+            <span><strong>{activePurchaseInvoices.length}</strong> factures</span>
+            <span><strong>{currency(purchaseOrdersValue + purchaseInvoicesValue)}</strong> TTC</span>
+          </div>
+        </div>
+      );
+    }
+    if (id === "suppliers") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Fournisseurs</h2>
+            <button className="ghost" onClick={() => setView("suppliers")}>Ouvrir</button>
+          </div>
+          <div className="dashboardMiniGrid">
+            <span><strong>{data.suppliers.length}</strong> fournisseurs</span>
+            <span><strong>{data.catalog.filter((item) => item.supplierId).length}</strong> articles lies</span>
+          </div>
+        </div>
+      );
+    }
+    if (id === "catalog") {
+      return (
+        <div className="panel compact dashboardWidget" key={id}>
+          <div className="panelTitle">
+            <h2>Catalogue</h2>
+            <button className="ghost" onClick={() => setView("catalog")}>Ouvrir</button>
+          </div>
+          <div className="dashboardMiniGrid">
+            <span><strong>{data.catalog.length}</strong> elements</span>
+            <span><strong>{data.catalog.filter((item) => !item.trackStock).length}</strong> non suivis</span>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="panel compact dashboardWidget" key={id}>
+        <div className="panelTitle">
+          <h2>Comptes</h2>
+          <button className="ghost" onClick={() => setView("accounting")}>Ouvrir</button>
+        </div>
+        <div className="dashboardMiniGrid">
+          <span><strong>{activeExpenses.length}</strong> depenses</span>
+          <span><strong>{currency(accountingExpenseValue)}</strong> TTC</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shell" style={themeCssVariables(activeTheme) as CSSProperties}>
@@ -2336,11 +2722,11 @@ export function App() {
           )}
           {canViewCompanySettings && (
             <button className={view === "company" ? "active" : ""} onClick={() => setView("company")}>
-              <Building2 size={18} /> Société
+              <Building2 size={18} /> SociÃ©tÃ©
             </button>
           )}
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
-            <Settings size={18} /> Paramètres
+            <Settings size={18} /> ParamÃ¨tres
           </button>
         </nav>
         <div className="quickActions">
@@ -2379,10 +2765,10 @@ export function App() {
           <div>
             <span className="eyebrow">Gestion commerciale</span>
             <h1>{pageTitle()}</h1>
-            {view === "documentDetail" && selectedDoc && <span className="contextLine">{clientLabel(selectedClient)}</span>}
+            {view === "documentDetail" && selectedDoc && <span className="contextLine">{clientDisplayLabel(selectedClient, data.clients)}</span>}
             {view === "documents" && selectedDoc && (
               <span className="contextLine">
-                {selectedDoc.number} · {clientLabel(selectedClient)}
+                {selectedDoc.number} Â· {clientDisplayLabel(selectedClient, data.clients)}
               </span>
             )}
           </div>
@@ -2399,18 +2785,57 @@ export function App() {
             )}
             {workspace && (
               <span className="workspaceBadge">
-                {workspace.organizationName} · {roleLabels[workspace.role]}
+                {workspace.organizationName} Â· {roleLabels[workspace.role]}
               </span>
             )}
             {workspace && (
               <button className="ghost" onClick={signOut}>
-                <LogOut size={17} /> Déconnexion
+                <LogOut size={17} /> DÃ©connexion
               </button>
             )}
           </div>
         </header>
 
         {view === "dashboard" && (
+          <section className="dashboard">
+            <details className="panel dashboardControls">
+              <summary className="panelTitle">
+                <span>Personnaliser le tableau</span>
+                <small>{dashboardWidgets.length} widget(s) visible(s)</small>
+              </summary>
+              <div className="dashboardWidgetList">
+                {allDashboardWidgets.map((widget) => {
+                  const visible = dashboardWidgets.includes(widget.id);
+                  const index = dashboardWidgets.indexOf(widget.id);
+                  return (
+                    <div key={widget.id} className={visible ? "dashboardWidgetOption active" : "dashboardWidgetOption"}>
+                      <label>
+                        <input type="checkbox" checked={visible} onChange={() => toggleDashboardWidget(widget.id)} />
+                        {widget.label}
+                      </label>
+                      <div>
+                        <button type="button" className="iconButton" disabled={!visible || index <= 0} onClick={() => moveDashboardWidget(widget.id, -1)}>
+                          â†‘
+                        </button>
+                        <button
+                          type="button"
+                          className="iconButton"
+                          disabled={!visible || index < 0 || index >= dashboardWidgets.length - 1}
+                          onClick={() => moveDashboardWidget(widget.id, 1)}
+                        >
+                          â†“
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+            {dashboardWidgets.map(renderDashboardWidget)}
+          </section>
+        )}
+
+        {false && view === "dashboard" && (
           <section className="dashboard">
             <div className="kpi">
               <FileText />
@@ -2429,7 +2854,7 @@ export function App() {
             </div>
             <div className="kpi">
               <FileCheck2 />
-              <span>À encaisser</span>
+              <span>Ã€ encaisser</span>
               <strong>{currency(pendingValue)}</strong>
             </div>
             <div className="panel compact">
@@ -2444,15 +2869,15 @@ export function App() {
             </div>
             <div className="panel compact">
               <div className="panelTitle">
-                <h2>Échéances</h2>
+                <h2>Ã‰chÃ©ances</h2>
               </div>
               <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
             </div>
             <div className="panel wide">
               <div className="panelTitle">
                 <div>
-                  <h2>Activité récente</h2>
-                  {recentDocuments.length > 5 && <span className="panelSubtitle">5 derniers documents affichés</span>}
+                  <h2>ActivitÃ© rÃ©cente</h2>
+                  {recentDocuments.length > 5 && <span className="panelSubtitle">5 derniers documents affichÃ©s</span>}
                 </div>
                 <div className="panelActions">
                   {recentDocuments.length > 5 && (
@@ -2462,7 +2887,7 @@ export function App() {
                   )}
                   {canEditOperations && (
                     <button onClick={() => createDocument("quote")}>
-                      <Plus size={17} /> Créer un devis
+                      <Plus size={17} /> CrÃ©er un devis
                     </button>
                   )}
                 </div>
@@ -2520,6 +2945,7 @@ export function App() {
             defaultVatRate={data.company.defaultVatRate}
             readOnly={!canManageCatalog}
             onSaveOrder={savePurchaseOrder}
+            onReceiveOrder={receivePurchaseOrder}
             onEmailOrder={emailPurchaseOrder}
             onCreateInvoice={createInvoiceFromPurchaseOrder}
             onDeleteOrder={deletePurchaseOrder}
@@ -2541,10 +2967,14 @@ export function App() {
           <SuppliersView
             suppliers={data.suppliers}
             catalog={data.catalog}
+            company={data.company}
             expenses={activeExpenses}
             readOnly={!canEditOperations}
             onSave={saveSupplier}
             onDelete={deleteSupplier}
+            onCreateItem={createSupplierCatalogItem}
+            onSaveItem={saveSupplierCatalogItem}
+            onDeleteItem={deleteCatalogItem}
           />
         )}
 
@@ -2556,7 +2986,7 @@ export function App() {
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Rechercher document, client, société, ligne..."
+                  placeholder="Rechercher document, client, sociÃ©tÃ©, ligne..."
                 />
               </div>
               <div className="segmented">
@@ -2608,7 +3038,7 @@ export function App() {
                       <div className="documentMonthHeader">
                         <strong>{group.label}</strong>
                         <span>
-                          {group.docs.length} document(s) · {currency(group.total)} TTC
+                          {group.docs.length} document(s) Â· {currency(group.total)} TTC
                         </span>
                       </div>
                       <div className="documentRows">
@@ -2642,11 +3072,11 @@ export function App() {
             {!filteredDocuments.length && (
               <div className="emptyState">
                 <FileText size={42} />
-                <h2>{activeDocuments.length ? "Aucun résultat" : "Aucun document"}</h2>
+                <h2>{activeDocuments.length ? "Aucun rÃ©sultat" : "Aucun document"}</h2>
                 <p>
                   {activeDocuments.length
-                    ? "Aucun devis, bon de commande ou facture ne correspond à cette recherche."
-                    : "Créez un premier devis pour démarrer le flux devis, bon de commande, facture."}
+                    ? "Aucun devis, bon de commande ou facture ne correspond Ã  cette recherche."
+                    : "CrÃ©ez un premier devis pour dÃ©marrer le flux devis, bon de commande, facture."}
                 </p>
                 {canEditOperations && (
                   <button onClick={() => createDocument("quote")}>
@@ -2703,7 +3133,7 @@ export function App() {
               <div className="emptyState">
                 <FileText size={42} />
                 <h2>Document introuvable</h2>
-                <p>Le document sélectionné n'existe plus ou n'a pas encore été chargé.</p>
+                <p>Le document sÃ©lectionnÃ© n'existe plus ou n'a pas encore Ã©tÃ© chargÃ©.</p>
                 <button
                   onClick={() => {
                     setSelectedId("");
@@ -2721,6 +3151,7 @@ export function App() {
           <CatalogManager
             items={sortedCatalog}
             suppliers={data.suppliers}
+            company={data.company}
             onCreate={createCatalogItem}
             onChange={updateCatalogItem}
             onDelete={deleteCatalogItem}
@@ -2735,7 +3166,7 @@ export function App() {
                 <input
                   value={clientQuery}
                   onChange={(event) => setClientQuery(event.target.value)}
-                  placeholder="Rechercher par numéro client, nom, email, téléphone, ville..."
+                  placeholder="Rechercher par numÃ©ro client, nom, email, tÃ©lÃ©phone, ville..."
                 />
               </div>
               {canEditOperations && (
@@ -2749,7 +3180,7 @@ export function App() {
                 ["all", "Tous", clientFilterCounts.all],
                 ["professionnel", "Pros", clientFilterCounts.professionnel],
                 ["particulier", "Particuliers", clientFilterCounts.particulier],
-                ["due", "À encaisser", clientFilterCounts.due],
+                ["due", "Ã€ encaisser", clientFilterCounts.due],
                 ["withDocuments", "Avec documents", clientFilterCounts.withDocuments],
               ].map(([value, label, count]) => (
                 <button
@@ -2778,7 +3209,7 @@ export function App() {
                     <span>{draftClient.number}</span>
                     <strong>{draftClient.name || "Nouveau client"}</strong>
                     <em>{draftClient.email || draftClient.phone || "Fiche en cours de saisie"}</em>
-                    <small>Non enregistré</small>
+                    <small>Non enregistrÃ©</small>
                   </button>
                 )}
                 {filteredClients.map((client) => {
@@ -2790,11 +3221,11 @@ export function App() {
                       onClick={() => setSelectedClientId(client.id)}
                     >
                       <span>{client.number}</span>
-                      <strong>{client.name || "Client sans nom"}</strong>
-                      <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
+                      <strong>{clientDisplayLabel(client, data.clients) || "Client sans nom"}</strong>
+                      <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "CoordonnÃ©es Ã  renseigner"}</em>
                       <small>
                         {stats.documents} doc.
-                        {stats.due > 0 ? ` · ${currency(stats.due)} dû` : ""}
+                        {stats.due > 0 ? ` Â· ${currency(stats.due)} dÃ»` : ""}
                       </small>
                     </button>
                   );
@@ -2804,22 +3235,25 @@ export function App() {
               {selectedClientForEdit ? (
                 <ClientFolder
                   client={selectedClientForEdit}
+                  clients={data.clients}
                   documents={selectedClientDocuments}
                   readOnly={!canEditOperations}
                   canDelete={canDeleteClients || draftClient?.id === selectedClientForEdit.id}
                   canCreateDocument={canEditOperations && draftClient?.id !== selectedClientForEdit.id}
                   onChange={updateClient}
                   onDelete={deleteClient}
+                  onCreateSubClient={() => createSubClient(selectedClientForEdit)}
+                  onSelectSubClient={setSelectedClientId}
                   onOpenDocument={(id) => openDocument(id, "clients")}
                   onCreateDocument={(type) => createDocument(type, selectedClientForEdit.id)}
                 />
               ) : (
                 <div className="emptyState clientEmpty">
                   <Users size={42} />
-                  <h2>{data.clients.length ? "Aucun client sélectionné" : "Aucun client"}</h2>
+                  <h2>{data.clients.length ? "Aucun client sÃ©lectionnÃ©" : "Aucun client"}</h2>
                   <p>
                     {data.clients.length
-                      ? "Sélectionnez un client dans la liste pour modifier sa fiche."
+                      ? "SÃ©lectionnez un client dans la liste pour modifier sa fiche."
                       : "Ajoutez votre premier client pour le retrouver ici."}
                   </p>
                   {canEditOperations && (
@@ -2838,7 +3272,7 @@ export function App() {
             {canViewCompanySettings && (
               <>
                 <div className="panelTitle">
-                  <h2>Identité et conditions</h2>
+                  <h2>IdentitÃ© et conditions</h2>
                   <div className="panelActions">
                     <button className="ghost" onClick={copyCompany}>
                       <Clipboard size={17} /> Copier
@@ -2857,7 +3291,7 @@ export function App() {
                   </div>
                   <div>
                     <strong>Logo de l'entreprise</strong>
-                    <span>Affiché dans l'app et sur les PDF générés.</span>
+                    <span>AffichÃ© dans l'app et sur les PDF gÃ©nÃ©rÃ©s.</span>
                   </div>
                   <div className="logoActions">
                     <button type="button" disabled={!canManageCompany} onClick={updateCompanyLogo}>
@@ -2886,7 +3320,7 @@ export function App() {
             <ThemeSettings
               currentThemeId={data.company.themeId}
               readOnly={!canManageCompany}
-              onSave={(themeId) => persist({ ...data, company: { ...data.company, themeId } }, "Thème enregistré")}
+              onSave={(themeId) => persist({ ...data, company: { ...data.company, themeId } }, "ThÃ¨me enregistrÃ©")}
             />
             {workspace && canManageTeam && (
               <TeamSettings
@@ -2950,7 +3384,7 @@ export function App() {
             }}
           >
             <div>
-              <span className="eyebrow">Action définitive</span>
+              <span className="eyebrow">Action dÃ©finitive</span>
               <h2 id="typedConfirmTitle">{typedConfirmation.title}</h2>
               <p>{typedConfirmation.message}</p>
             </div>
@@ -3033,7 +3467,7 @@ function AuthForm({
         <div className="logo">DV</div>
         <div>
           <strong>Devix</strong>
-          <span>Accès sécurisé</span>
+          <span>AccÃ¨s sÃ©curisÃ©</span>
         </div>
       </div>
       <div className="segmented authMode">
@@ -3067,10 +3501,10 @@ function AuthForm({
       {message && <span className="authMessage">{message}</span>}
       <button type="submit" disabled={busy}>
         {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
-        {mode === "signin" ? "Se connecter" : "Créer le compte"}
+        {mode === "signin" ? "Se connecter" : "CrÃ©er le compte"}
       </button>
       <button className="ghost passwordLinkButton" type="button" disabled={busy} onClick={onPasswordSetup}>
-        Définir / réinitialiser le mot de passe
+        DÃ©finir / rÃ©initialiser le mot de passe
       </button>
     </form>
   );
@@ -3179,24 +3613,24 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
     ? {
         browser: "Navigateur",
         development: "Electron dev",
-        installed: "Installé",
+        installed: "InstallÃ©",
         portable: "Portable",
       }[diagnostics.mode]
     : "Chargement";
-  const sessionLabel = workspace ? `${workspace.organizationName} · ${roleLabels[workspace.role]}` : "Mode local";
+  const sessionLabel = workspace ? `${workspace.organizationName} Â· ${roleLabels[workspace.role]}` : "Mode local";
   const lastLocalBackup = diagnostics?.lastLocalBackupAt ? formatShortDate(diagnostics.lastLocalBackupAt) : "Jamais";
   const oneDriveBackupLabel = diagnostics?.oneDriveBackupRoot
     ? diagnostics.lastOneDriveBackupAt
       ? formatShortDate(diagnostics.lastOneDriveBackupAt)
       : "Jamais"
-    : "Non configuré";
+    : "Non configurÃ©";
   const pathRows = diagnostics
     ? [
-        { key: "userData", label: "Dossier données", value: diagnostics.userDataPath, canOpen: diagnostics.mode !== "browser" },
+        { key: "userData", label: "Dossier donnÃ©es", value: diagnostics.userDataPath, canOpen: diagnostics.mode !== "browser" },
         { key: "dataPath", label: "Fichier local", value: diagnostics.dataPath, canOpen: false },
         { key: "backupRoot", label: "Sauvegardes locales", value: diagnostics.backupRoot, canOpen: diagnostics.mode !== "browser" },
-        { key: "attachmentsRoot", label: "Pièces jointes", value: diagnostics.attachmentsRoot, canOpen: diagnostics.mode !== "browser" },
-        { key: "oneDriveBackupRoot", label: "Sauvegardes OneDrive", value: diagnostics.oneDriveBackupRoot || "Non configuré", canOpen: Boolean(diagnostics.oneDriveBackupRoot) },
+        { key: "attachmentsRoot", label: "PiÃ¨ces jointes", value: diagnostics.attachmentsRoot, canOpen: diagnostics.mode !== "browser" },
+        { key: "oneDriveBackupRoot", label: "Sauvegardes OneDrive", value: diagnostics.oneDriveBackupRoot || "Non configurÃ©", canOpen: Boolean(diagnostics.oneDriveBackupRoot) },
       ]
     : [];
 
@@ -3207,7 +3641,7 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
           <Settings size={20} />
         </div>
         <div>
-          <span className="eyebrow">À propos</span>
+          <span className="eyebrow">Ã€ propos</span>
           <h2>Version et diagnostic</h2>
         </div>
       </div>
@@ -3226,19 +3660,19 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
           <strong>{sessionLabel}</strong>
         </div>
         <div>
-          <span>Données</span>
+          <span>DonnÃ©es</span>
           <strong>
-            {data.clients.length} clients · {data.documents.length} docs
+            {data.clients.length} clients Â· {data.documents.length} docs
           </strong>
         </div>
         <div>
           <span>Achats</span>
           <strong>
-            {data.suppliers.length} fournisseurs · {data.purchaseOrders.length + data.purchaseInvoices.length} pièces
+            {data.suppliers.length} fournisseurs Â· {data.purchaseOrders.length + data.purchaseInvoices.length} piÃ¨ces
           </strong>
         </div>
         <div>
-          <span>Dernière sauvegarde locale</span>
+          <span>DerniÃ¨re sauvegarde locale</span>
           <strong>{lastLocalBackup}</strong>
         </div>
         <div>
@@ -3259,7 +3693,7 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
               <strong>{row.value}</strong>
             </div>
             <button className="ghost subtleButton" type="button" disabled={!row.value} onClick={() => void copyValue(row.key, row.value)}>
-              <Clipboard size={15} /> {copiedKey === row.key ? "Copié" : "Copier"}
+              <Clipboard size={15} /> {copiedKey === row.key ? "CopiÃ©" : "Copier"}
             </button>
             {row.canOpen && (
               <button className="ghost subtleButton" type="button" disabled={busyPath === row.value} onClick={() => void openPath(row.value)}>
@@ -3312,11 +3746,11 @@ function ThemeSettings({
         </div>
         <div>
           <span className="eyebrow">Apparence</span>
-          <h2>Thème</h2>
-          <p>La palette choisie s’applique à Devix et à tous les PDF générés.</p>
+          <h2>ThÃ¨me</h2>
+          <p>La palette choisie sâ€™applique Ã  Devix et Ã  tous les PDF gÃ©nÃ©rÃ©s.</p>
         </div>
       </div>
-      <div className="themeGrid" role="radiogroup" aria-label="Thème de couleur">
+      <div className="themeGrid" role="radiogroup" aria-label="ThÃ¨me de couleur">
         {devixThemes.map((theme) => {
           const selected = selectedThemeId === theme.id;
           return (
@@ -3347,16 +3781,16 @@ function ThemeSettings({
         })}
       </div>
       <div className="themeActions">
-        {readOnly && <span className="preferenceHint">Seuls les administrateurs peuvent modifier le thème de l’entreprise.</span>}
+        {readOnly && <span className="preferenceHint">Seuls les administrateurs peuvent modifier le thÃ¨me de lâ€™entreprise.</span>}
         {saved && (
           <span className="inlineSaveConfirmation">
-            <Check size={16} /> Thème enregistré
+            <Check size={16} /> ThÃ¨me enregistrÃ©
           </span>
         )}
         {!readOnly && (
           <button type="button" disabled={saving || selectedThemeId === currentThemeId} onClick={() => void applyTheme()}>
             {saving ? <LoaderCircle className="spinIcon" size={17} /> : <Palette size={17} />}
-            {saving ? "Application…" : "Appliquer le thème"}
+            {saving ? "Applicationâ€¦" : "Appliquer le thÃ¨me"}
           </button>
         )}
       </div>
@@ -3391,7 +3825,7 @@ function AccountPasswordSettings({
       <div className="panelTitle accountTitle">
         <div>
           <span className="eyebrow">Compte</span>
-          <h3>Accès personnel</h3>
+          <h3>AccÃ¨s personnel</h3>
         </div>
         <div className="accountActions">
           <span className="accountEmail">{email}</span>
@@ -3409,7 +3843,7 @@ function AccountPasswordSettings({
               autoComplete="new-password"
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="8 caractères minimum"
+              placeholder="8 caractÃ¨res minimum"
             />
           </label>
           <label>
@@ -3419,7 +3853,7 @@ function AccountPasswordSettings({
               autoComplete="new-password"
               value={confirmPassword}
               onChange={(event) => onConfirmPasswordChange(event.target.value)}
-              placeholder="Répéter le mot de passe"
+              placeholder="RÃ©pÃ©ter le mot de passe"
             />
           </label>
           <button type="submit" disabled={busy || !password || !confirmPassword}>
@@ -3431,7 +3865,7 @@ function AccountPasswordSettings({
       <div className="accountDangerZone">
         <div>
           <strong>Supprimer le compte</strong>
-          <span>Suppression définitive de votre accès et de vos entreprises propriétaires.</span>
+          <span>Suppression dÃ©finitive de votre accÃ¨s et de vos entreprises propriÃ©taires.</span>
         </div>
         {deleteConfirmOpen ? (
           <div className="accountDeleteConfirm">
@@ -3487,8 +3921,8 @@ function TeamSettings({
     <section className="teamSection">
       <div className="panelTitle teamTitle">
         <div>
-          <span className="eyebrow">Équipe</span>
-          <h3>Employés et accès</h3>
+          <span className="eyebrow">Ã‰quipe</span>
+          <h3>EmployÃ©s et accÃ¨s</h3>
         </div>
         <button className="ghost subtleButton" disabled={busy} onClick={onRefresh} type="button">
           {busy ? <LoaderCircle className="spinIcon" size={15} /> : <Users size={15} />}
@@ -3499,7 +3933,7 @@ function TeamSettings({
       {canManage && (
         <form className="inviteForm" onSubmit={onSubmitInvitation}>
           <label>
-            Email employé
+            Email employÃ©
             <input
               type="email"
               value={inviteEmail}
@@ -3558,7 +3992,7 @@ function TeamSettings({
                       className="iconButton dangerIcon"
                       disabled={locked || busy}
                       onClick={() => onDeleteMember(member)}
-                      title="Retirer l'employé"
+                      title="Retirer l'employÃ©"
                       type="button"
                     >
                       <Trash2 size={17} />
@@ -3567,7 +4001,7 @@ function TeamSettings({
                 </div>
               );
             })}
-            {!members.length && <div className="emptyRows compactEmpty">Aucun membre chargé.</div>}
+            {!members.length && <div className="emptyRows compactEmpty">Aucun membre chargÃ©.</div>}
           </div>
         </div>
 
@@ -3583,10 +4017,10 @@ function TeamSettings({
                   <div>
                     <strong>{invitation.email}</strong>
                     <span>
-                      {roleLabels[invitation.role]} · expire le {formatShortDate(invitation.expiresAt)}
+                      {roleLabels[invitation.role]} Â· expire le {formatShortDate(invitation.expiresAt)}
                     </span>
                   </div>
-                  <span className="statusBadge info">Email envoyé</span>
+                  <span className="statusBadge info">Email envoyÃ©</span>
                   <button
                     className="iconButton dangerIcon"
                     disabled={busy}
@@ -3605,7 +4039,7 @@ function TeamSettings({
       </div>
 
       <span className="teamFootnote">
-        {workspace.organizationName} · {roleLabels[workspace.role]}
+        {workspace.organizationName} Â· {roleLabels[workspace.role]}
       </span>
     </section>
   );
@@ -3621,7 +4055,7 @@ function DocumentRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; cli
           <strong>
             {labels[doc.type]} {doc.number}
           </strong>
-          <em>{clientLabel(clients.find((client) => client.id === doc.clientId))}</em>
+          <em>{clientDisplayLabel(clients.find((client) => client.id === doc.clientId), clients)}</em>
           <b>{currency(totals(doc.lines).totalTtc)}</b>
           <StatusBadge status={doc.status} />
           <ChevronRight size={16} />
@@ -3632,14 +4066,14 @@ function DocumentRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; cli
 }
 
 function DueRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; clients: Client[]; onOpen: (id: string) => void }) {
-  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune échéance ouverte.</div>;
+  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune Ã©chÃ©ance ouverte.</div>;
   return (
     <div className="dueRows">
       {docs.map((doc) => (
         <button key={doc.id} onClick={() => onOpen(doc.id)}>
           <span>{doc.dueDate}</span>
           <strong>{doc.number}</strong>
-          <em>{clientLabel(clients.find((client) => client.id === doc.clientId))}</em>
+          <em>{clientDisplayLabel(clients.find((client) => client.id === doc.clientId), clients)}</em>
         </button>
       ))}
     </div>
@@ -3700,8 +4134,8 @@ function ArchivesView({
       <section className="panel archiveActionPanel">
         <div className="panelTitle">
           <div>
-            <span className="eyebrow">Clôture annuelle</span>
-            <h2>Archiver une année terminée</h2>
+            <span className="eyebrow">ClÃ´ture annuelle</span>
+            <h2>Archiver une annÃ©e terminÃ©e</h2>
           </div>
           <div className="panelActions">
             <select
@@ -3719,12 +4153,12 @@ function ArchivesView({
               disabled={!canArchive || selectedArchiveCandidate === undefined || activeForSelection === 0}
               onClick={() => selectedArchiveCandidate !== undefined && void onArchiveYear(selectedArchiveCandidate)}
             >
-              <Archive size={17} /> {selectedArchiveCandidate === undefined ? "Aucune année à archiver" : `Archiver ${selectedArchiveCandidate}`}
+              <Archive size={17} /> {selectedArchiveCandidate === undefined ? "Aucune annÃ©e Ã  archiver" : `Archiver ${selectedArchiveCandidate}`}
             </button>
           </div>
         </div>
         <p>
-          {activeForSelection} élément(s) actif(s) seront retirés des vues courantes. Ils resteront consultables ici, documents et livre de
+          {activeForSelection} Ã©lÃ©ment(s) actif(s) seront retirÃ©s des vues courantes. Ils resteront consultables ici, documents et livre de
           comptes compris.
         </p>
       </section>
@@ -3732,7 +4166,7 @@ function ArchivesView({
       <section className="archiveLayout">
         <aside className="panel archiveYearList">
           <div className="panelTitle">
-            <h2>Années archivées</h2>
+            <h2>AnnÃ©es archivÃ©es</h2>
           </div>
           {years.length ? (
             years.map((year) => (
@@ -3742,7 +4176,7 @@ function ArchivesView({
               </button>
             ))
           ) : (
-            <div className="emptyRows compactEmpty">Aucune année archivée.</div>
+            <div className="emptyRows compactEmpty">Aucune annÃ©e archivÃ©e.</div>
           )}
         </aside>
 
@@ -3769,7 +4203,7 @@ function ArchivesView({
                   <strong>{currency(archiveReport.operatingExpensesHt)}</strong>
                 </div>
                 <div>
-                  <span>Résultat</span>
+                  <span>RÃ©sultat</span>
                   <strong>{currency(archiveReport.netProfit)}</strong>
                 </div>
               </div>
@@ -3790,14 +4224,14 @@ function ArchivesView({
                     </button>
                   );
                 })}
-                {!previewData.documents.length && <div className="emptyRows">Aucun document commercial archivé pour cette année.</div>}
+                {!previewData.documents.length && <div className="emptyRows">Aucun document commercial archivÃ© pour cette annÃ©e.</div>}
               </div>
             </>
           ) : (
             <div className="emptyState">
               <Archive size={42} />
-              <h2>Sélectionnez une année</h2>
-              <p>Les documents archivés et la synthèse comptable de l’année apparaîtront ici.</p>
+              <h2>SÃ©lectionnez une annÃ©e</h2>
+              <p>Les documents archivÃ©s et la synthÃ¨se comptable de lâ€™annÃ©e apparaÃ®tront ici.</p>
             </div>
           )}
         </section>
@@ -3869,7 +4303,7 @@ function SuperadminView({
               </div>
               <div className="panelActions">
                 <span className="workspaceBadge">
-                  Mis à jour {selectedWorkspace.updatedAt ? formatShortDate(selectedWorkspace.updatedAt) : "inconnu"}
+                  Mis Ã  jour {selectedWorkspace.updatedAt ? formatShortDate(selectedWorkspace.updatedAt) : "inconnu"}
                 </span>
                 <button className="danger" disabled={busy} onClick={() => void onDelete(selectedWorkspace)}>
                   <Trash2 size={17} /> Supprimer
@@ -3922,7 +4356,7 @@ function SuperadminView({
                         <th>Mois</th>
                         <th>CA HT</th>
                         <th>Charges</th>
-                        <th>Résultat</th>
+                        <th>RÃ©sultat</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3937,7 +4371,7 @@ function SuperadminView({
                       {!report.months.length && (
                         <tr>
                           <td colSpan={4} className="accountingEmpty">
-                            Aucune écriture sur l’année.
+                            Aucune Ã©criture sur lâ€™annÃ©e.
                           </td>
                         </tr>
                       )}
@@ -3950,8 +4384,8 @@ function SuperadminView({
         ) : (
           <div className="emptyState">
             <ShieldCheck size={42} />
-            <h2>Sélectionnez un compte</h2>
-            <p>Les documents, bons de commande, factures et comptes s’afficheront ici.</p>
+            <h2>SÃ©lectionnez un compte</h2>
+            <p>Les documents, bons de commande, factures et comptes sâ€™afficheront ici.</p>
           </div>
         )}
       </section>
@@ -4055,7 +4489,7 @@ function DocumentEditor({
   const patchLine = (id: string, partial: Partial<LineItem>) =>
     patch({ lines: doc.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
   const removeLine = (line: LineItem) => {
-    if (!confirmDestructiveAction(`Supprimer la ligne « ${line.description || "sans désignation"} » ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer la ligne Â« ${line.description || "sans dÃ©signation"} Â» ?`)) return;
     patch({ lines: doc.lines.filter((item) => item.id !== line.id) });
   };
   const savedDepositAmount = Number(doc.depositPaidAmount) || 0;
@@ -4094,12 +4528,12 @@ function DocumentEditor({
   const removePayment = (paymentId: string) => {
     if (!canEditPayments) return;
     const payment = (doc.payments || []).find((entry) => entry.id === paymentId);
-    if (!confirmDestructiveAction(`Supprimer le règlement${payment ? ` de ${currency(payment.amount)}` : ""} ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer le rÃ¨glement${payment ? ` de ${currency(payment.amount)}` : ""} ?`)) return;
     patchPayment({ payments: (doc.payments || []).filter((payment) => payment.id !== paymentId) });
   };
   const addReminder = async () => {
     if (!canEditPayments || reminderSending) return;
-    setReminderMessage(reminderDraft.channel === "email" ? "Préparation du PDF de relance..." : "Enregistrement de la relance...");
+    setReminderMessage(reminderDraft.channel === "email" ? "PrÃ©paration du PDF de relance..." : "Enregistrement de la relance...");
     setReminderSending(true);
     await new Promise((resolve) => window.setTimeout(resolve, 80));
     const reminder: PaymentReminder = {
@@ -4115,7 +4549,7 @@ function DocumentEditor({
         if (result.success) setReminderDraft({ sentAt: todayIso(), channel: reminderDraft.channel, note: "" });
       } catch (error) {
         console.error("Relance impossible", error);
-        setReminderMessage("Relance impossible. Vérifiez le client mail ou l'adresse du client.");
+        setReminderMessage("Relance impossible. VÃ©rifiez le client mail ou l'adresse du client.");
       } finally {
         setReminderSending(false);
         window.setTimeout(() => setReminderMessage(""), 5200);
@@ -4125,7 +4559,7 @@ function DocumentEditor({
     patchPayment({ reminders: [reminder, ...(doc.reminders || [])] });
     setReminderDraft({ sentAt: todayIso(), channel: reminderDraft.channel, note: "" });
     setReminderSending(false);
-    setReminderMessage("Relance enregistrée.");
+    setReminderMessage("Relance enregistrÃ©e.");
     window.setTimeout(() => setReminderMessage(""), 2600);
   };
   const removeReminder = (reminderId: string) => {
@@ -4156,16 +4590,16 @@ function DocumentEditor({
     <article className="editor">
       <div className="editorHeader editorActionBar">
         <div className="documentState">
-          <span className="eyebrow">État du document</span>
+          <span className="eyebrow">Ã‰tat du document</span>
           <StatusBadge status={doc.status} />
           <span className={`documentSaveStatus ${saveState}`}>
             {saveState === "dirty"
-              ? "Modifications non enregistrées"
+              ? "Modifications non enregistrÃ©es"
               : saveState === "saving"
-                ? "Enregistrement…"
+                ? "Enregistrementâ€¦"
                 : saveState === "error"
                   ? "Sauvegarde impossible"
-                  : "Enregistré"}
+                  : "EnregistrÃ©"}
           </span>
         </div>
         <div className="editorActions">
@@ -4177,7 +4611,7 @@ function DocumentEditor({
                 onClick={() => onSave(doc)}
               >
                 {saveState === "saving" ? <LoaderCircle className="spinIcon" size={17} /> : <Save size={17} />}
-                {saveState === "saving" ? "Enregistrement…" : "Enregistrer"}
+                {saveState === "saving" ? "Enregistrementâ€¦" : "Enregistrer"}
               </button>
             )}
             {!readOnly && doc.type === "quote" && (
@@ -4212,7 +4646,7 @@ function DocumentEditor({
             </button>
             <button className="ghost" disabled={emailing} onClick={sendEmail}>
               {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
-              {emailing ? "Préparation..." : "Email"}
+              {emailing ? "PrÃ©paration..." : "Email"}
             </button>
           </div>
           <div className="editorActionGroup secondaryActions">
@@ -4253,7 +4687,7 @@ function DocumentEditor({
             <div>
               <span className="sectionStep">1</span>
               <div>
-                <h3>Informations générales</h3>
+                <h3>Informations gÃ©nÃ©rales</h3>
                 <p>Client, objet et calendrier du document</p>
               </div>
             </div>
@@ -4264,7 +4698,7 @@ function DocumentEditor({
               <select disabled={readOnly} value={doc.clientId} onChange={(event) => patch({ clientId: event.target.value })}>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
-                    {clientLabel(client)}
+                    {clientDisplayLabel(client, clients)}
                   </option>
                 ))}
               </select>
@@ -4279,11 +4713,11 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Date d’émission
+              Date dâ€™Ã©mission
               <input disabled={readOnly} type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} />
             </label>
             <label>
-              Échéance
+              Ã‰chÃ©ance
               <input disabled={readOnly} type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} />
             </label>
           </div>
@@ -4295,7 +4729,7 @@ function DocumentEditor({
               <span className="sectionStep">2</span>
               <div>
                 <h3>Chantier et conditions</h3>
-                <p>Lieu, planning et acompte demandé</p>
+                <p>Lieu, planning et acompte demandÃ©</p>
               </div>
             </div>
           </div>
@@ -4304,13 +4738,13 @@ function DocumentEditor({
               Adresse du chantier
               <input
                 disabled={readOnly}
-                placeholder="Si différente de l’adresse client"
+                placeholder="Si diffÃ©rente de lâ€™adresse client"
                 value={doc.siteAddress}
                 onChange={(event) => patch({ siteAddress: event.target.value })}
               />
             </label>
             <label>
-              Démarrage prévu
+              DÃ©marrage prÃ©vu
               <input
                 disabled={readOnly}
                 placeholder="Ex. : semaine 42"
@@ -4319,7 +4753,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Durée estimée
+              DurÃ©e estimÃ©e
               <input
                 disabled={readOnly}
                 placeholder="Ex. : 3 jours"
@@ -4328,7 +4762,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Acompte demandé
+              Acompte demandÃ©
               <span className="suffixInput formSuffix">
                 <input
                   disabled={readOnly}
@@ -4350,7 +4784,7 @@ function DocumentEditor({
             <span className="sectionStep">3</span>
             <div>
               <h3>Articles et prestations</h3>
-              <p>{doc.lines.length ? `${doc.lines.length} ligne(s) dans le document` : "Ajoutez les éléments à facturer"}</p>
+              <p>{doc.lines.length ? `${doc.lines.length} ligne(s) dans le document` : "Ajoutez les Ã©lÃ©ments Ã  facturer"}</p>
             </div>
           </div>
         </div>
@@ -4368,7 +4802,7 @@ function DocumentEditor({
               </option>
               {catalog.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.category || "Sans catégorie"} - {item.name || "Élément sans nom"} ({currency(item.price)}/{item.unit || "u"})
+                  {item.category || "Sans catÃ©gorie"} - {item.name || "Ã‰lÃ©ment sans nom"} ({currency(item.price)}/{item.unit || "u"})
                 </option>
               ))}
             </select>
@@ -4381,18 +4815,21 @@ function DocumentEditor({
         {doc.lines.length ? (
           <div className="lineTable">
             <div className="lineHead">
-              <span>Désignation</span>
-              <span>Unité</span>
-              <span>Qté</span>
+              <span>DÃ©signation</span>
+              <span>UnitÃ©</span>
+              <span>QtÃ©</span>
               <span>PU HT</span>
               <span>Remise</span>
               <span>TVA</span>
-              <span>Total</span>
+              <span>Total HT</span>
+              <span>Total TTC</span>
               <span>Marge</span>
               <span></span>
             </div>
             {doc.lines.map((line) => {
               const margin = lineMargin(line);
+              const lineTotalHt = line.quantity * line.unitPrice * (1 - line.discount / 100);
+              const lineTotalTtc = lineTotalHt * (1 + line.vatRate / 100);
               const targetMargin = Number(marginTargets[line.id]);
               const targetDiscount = Number.isFinite(targetMargin) ? requiredDiscountForMargin(line, targetMargin) : null;
               const canApplyTargetDiscount = targetDiscount !== null && targetDiscount >= 0 && targetDiscount <= 100;
@@ -4409,7 +4846,7 @@ function DocumentEditor({
                       disabled={readOnly}
                       value={line.details}
                       onChange={(event) => patchLine(line.id, { details: event.target.value })}
-                      placeholder="Détails : essence, finition, quincaillerie, pose..."
+                      placeholder="DÃ©tails : essence, finition, quincaillerie, pose..."
                     />
                     {!readOnly && (
                       <div className="marginHelperShell">
@@ -4440,7 +4877,7 @@ function DocumentEditor({
                               ) : targetDiscount === null || !marginTargets[line.id] ? (
                                 <span>Renseignez une marge cible</span>
                               ) : canApplyTargetDiscount ? (
-                                <span>Remise conseillée : {targetDiscount.toFixed(1)}%</span>
+                                <span>Remise conseillÃ©e : {targetDiscount.toFixed(1)}%</span>
                               ) : (
                                 <span>Objectif impossible avec ce prix d'achat</span>
                               )}
@@ -4498,7 +4935,8 @@ function DocumentEditor({
                     />
                     <span>%</span>
                   </span>
-                  <strong>{currency(line.quantity * line.unitPrice * (1 - line.discount / 100))}</strong>
+                  <strong>{currency(lineTotalHt)}</strong>
+                  <strong>{currency(lineTotalTtc)}</strong>
                   <strong className={margin.amount < 0 ? "marginValue negative" : "marginValue"}>
                     <span>{currency(margin.amount)}</span>
                     <em>{margin.rate.toFixed(0)}%</em>
@@ -4529,7 +4967,7 @@ function DocumentEditor({
             <span className="sectionStep">4</span>
             <div>
               <h3>Conditions et totaux</h3>
-              <p>Informations finales qui apparaîtront sur le document</p>
+              <p>Informations finales qui apparaÃ®tront sur le document</p>
             </div>
           </div>
         </div>
@@ -4538,7 +4976,7 @@ function DocumentEditor({
             Note document
             <textarea
               disabled={readOnly}
-              placeholder="Informations affichées sur ce document"
+              placeholder="Informations affichÃ©es sur ce document"
               value={doc.notes}
               onChange={(event) => patch({ notes: event.target.value })}
             />
@@ -4547,7 +4985,7 @@ function DocumentEditor({
             Conditions
             <textarea
               disabled={readOnly}
-              placeholder="Conditions propres à ce document"
+              placeholder="Conditions propres Ã  ce document"
               value={doc.terms}
               onChange={(event) => patch({ terms: event.target.value })}
             />
@@ -4579,21 +5017,21 @@ function DocumentEditor({
         <section className="paymentPanel" aria-label="Paiements">
           <div className="paymentSummary">
             <div>
-              <span>Acompte encaissé</span>
+              <span>Acompte encaissÃ©</span>
               <strong>{currency(paySummary.depositPaidAmount)}</strong>
             </div>
             <div>
-              <span>Règlements</span>
+              <span>RÃ¨glements</span>
               <strong>{currency(paySummary.paymentAmount)}</strong>
             </div>
             <div>
-              <span>Reste dû</span>
+              <span>Reste dÃ»</span>
               <strong>{currency(paySummary.remainingAmount)}</strong>
             </div>
           </div>
           <div className="paymentGrid">
             <label>
-              Acompte encaissé
+              Acompte encaissÃ©
               <input
                 disabled={!canEditPayments}
                 type="number"
@@ -4619,11 +5057,11 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Reste dû
+              Reste dÃ»
               <input disabled type="number" min="0" step="0.01" value={paySummary.remainingAmount.toFixed(2)} readOnly />
             </label>
             <label>
-              Règlement à ajouter
+              RÃ¨glement Ã  ajouter
               <input
                 disabled={!canEditPayments}
                 type="number"
@@ -4635,7 +5073,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Date règlement
+              Date rÃ¨glement
               <input
                 disabled={!canEditPayments}
                 type="date"
@@ -4658,16 +5096,16 @@ function DocumentEditor({
               </select>
             </label>
             <label>
-              Note règlement
+              Note rÃ¨glement
               <input
                 disabled={!canEditPayments}
                 value={paymentDraft.note}
                 onChange={(event) => setPaymentDraft((draft) => ({ ...draft, note: event.target.value }))}
-                placeholder="Référence, banque..."
+                placeholder="RÃ©fÃ©rence, banque..."
               />
             </label>
             <button type="button" disabled={!canAddPayment} onClick={addPayment}>
-              <Check size={17} /> Ajouter règlement
+              <Check size={17} /> Ajouter rÃ¨glement
             </button>
           </div>
           <label className="fullLabel">
@@ -4676,7 +5114,7 @@ function DocumentEditor({
               disabled={!canEditPayments}
               value={doc.paymentNotes || ""}
               onChange={(event) => patchPayment({ paymentNotes: event.target.value })}
-              placeholder="Informations internes de règlement"
+              placeholder="Informations internes de rÃ¨glement"
             />
           </label>
           {!!doc.payments?.length && (
@@ -4720,7 +5158,7 @@ function DocumentEditor({
                   }
                 >
                   <option value="email">Email</option>
-                  <option value="phone">Téléphone</option>
+                  <option value="phone">TÃ©lÃ©phone</option>
                   <option value="letter">Courrier</option>
                   <option value="other">Autre</option>
                 </select>
@@ -4731,12 +5169,12 @@ function DocumentEditor({
                   disabled={!canEditPayments || reminderSending}
                   value={reminderDraft.note}
                   onChange={(event) => setReminderDraft((draft) => ({ ...draft, note: event.target.value }))}
-                  placeholder="Relance envoyée, réponse client..."
+                  placeholder="Relance envoyÃ©e, rÃ©ponse client..."
                 />
               </label>
               <button type="button" disabled={!canEditPayments || reminderSending} onClick={addReminder}>
                 {reminderSending ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
-                {reminderSending ? "Préparation PDF..." : "Ajouter relance"}
+                {reminderSending ? "PrÃ©paration PDF..." : "Ajouter relance"}
               </button>
             </div>
             {reminderMessage && <div className={reminderSending ? "reminderFeedback pending" : "reminderFeedback"}>{reminderMessage}</div>}
@@ -4763,17 +5201,17 @@ function DocumentEditor({
         </section>
       )}
 
-      <section className="attachmentsPanel" aria-label="Pièces jointes">
+      <section className="attachmentsPanel" aria-label="PiÃ¨ces jointes">
         <div className="attachmentsSummary">
           <div className="attachmentsTitle">
             <Paperclip size={15} />
             <div>
-              <h3>Documents associés</h3>
-              <span>{doc.attachments.length ? `${doc.attachments.length} pièce(s) jointe(s)` : "Aucune pièce jointe"}</span>
+              <h3>Documents associÃ©s</h3>
+              <span>{doc.attachments.length ? `${doc.attachments.length} piÃ¨ce(s) jointe(s)` : "Aucune piÃ¨ce jointe"}</span>
             </div>
           </div>
           {!readOnly && (
-            <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une pièce jointe">
+            <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une piÃ¨ce jointe">
               <Paperclip size={16} /> Ajouter
             </button>
           )}
@@ -4785,17 +5223,17 @@ function DocumentEditor({
                 <div>
                   <strong>{attachment.name}</strong>
                   <span>
-                    {fileSizeLabel(attachment.size)} - ajouté le {formatShortDate(attachment.addedAt)}
+                    {fileSizeLabel(attachment.size)} - ajoutÃ© le {formatShortDate(attachment.addedAt)}
                   </span>
                 </div>
-                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la pièce jointe">
+                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la piÃ¨ce jointe">
                   <ExternalLink size={16} />
                 </button>
                 {!readOnly && (
                   <button
                     className="iconButton dangerIcon"
                     onClick={() => onRemoveAttachment(doc, attachment)}
-                    title="Supprimer la pièce jointe"
+                    title="Supprimer la piÃ¨ce jointe"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -4807,7 +5245,7 @@ function DocumentEditor({
       </section>
       <section className="previewDisclosure">
         <button className="ghost previewToggle" type="button" onClick={() => setPreviewOpen((open) => !open)}>
-          <Eye size={17} /> {previewOpen ? "Masquer l’aperçu" : "Afficher l’aperçu"}
+          <Eye size={17} /> {previewOpen ? "Masquer lâ€™aperÃ§u" : "Afficher lâ€™aperÃ§u"}
         </button>
         {previewOpen && <DocumentPreview doc={doc} client={client} sums={sums} />}
       </section>
@@ -4825,7 +5263,7 @@ function HistoryPanel({ doc }: { doc: BusinessDocument }) {
             {labels[entry.fromType]} {entry.fromNumber} {"->"} {labels[entry.toType]} {entry.toNumber}
           </strong>
           <em>
-            {entry.snapshot.projectName || "Sans nom"} · {currency(totals(entry.snapshot.lines).totalTtc)}
+            {entry.snapshot.projectName || "Sans nom"} Â· {currency(totals(entry.snapshot.lines).totalTtc)}
           </em>
         </article>
       ))}
@@ -4847,7 +5285,7 @@ function DocumentPreview({ doc, client, sums }: { doc: BusinessDocument; client?
         <strong>{clientLabel(client)}</strong>
         <span>{doc.projectName || "Document sans nom"}</span>
         <span>
-          {doc.issueDate} · {doc.dueDate}
+          {doc.issueDate} Â· {doc.dueDate}
         </span>
       </div>
       <div className="previewLines">
@@ -4870,18 +5308,21 @@ function DocumentPreview({ doc, client, sums }: { doc: BusinessDocument; client?
 function CatalogManager({
   items,
   suppliers,
+  company,
   onCreate,
   onChange,
   onDelete,
 }: {
   items: CatalogItem[];
   suppliers: Supplier[];
+  company: CompanySettings;
   onCreate: () => void;
   onChange: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
 }) {
   const [query, setQuery] = useState("");
   const [stockFilter, setStockFilter] = useState<"all" | "tracked" | "low" | "out" | "untracked">("all");
+  const [itemDrafts, setItemDrafts] = useState<Record<string, CatalogItem>>({});
   const [movementDrafts, setMovementDrafts] = useState<Record<string, { quantity: string; reason: string }>>({});
   const [movementOpen, setMovementOpen] = useState<Record<string, boolean>>({});
   const trackedItems = items.filter((item) => item.trackStock);
@@ -4900,7 +5341,19 @@ function CatalogManager({
       if (stockFilter === "out") return item.trackStock && item.stockQuantity <= 0;
       return true;
     });
-  const patch = (item: CatalogItem, partial: Partial<CatalogItem>) => onChange({ ...item, ...partial });
+  const itemDraft = (item: CatalogItem) => itemDrafts[item.id] || item;
+  const patch = (item: CatalogItem, partial: Partial<CatalogItem>) =>
+    setItemDrafts((drafts) => ({ ...drafts, [item.id]: { ...itemDraft(item), ...partial } }));
+  const isItemDirty = (item: CatalogItem) => JSON.stringify(itemDraft(item)) !== JSON.stringify(item);
+  const saveItemDraft = (item: CatalogItem) => {
+    const draft = itemDraft(item);
+    onChange(draft);
+    setItemDrafts((drafts) => {
+      const next = { ...drafts };
+      delete next[item.id];
+      return next;
+    });
+  };
   const movementDraft = (itemId: string) => movementDrafts[itemId] || { quantity: "", reason: "" };
   const patchMovementDraft = (itemId: string, partial: Partial<{ quantity: string; reason: string }>) =>
     setMovementDrafts((drafts) => ({ ...drafts, [itemId]: { ...movementDraft(itemId), ...partial } }));
@@ -4929,7 +5382,7 @@ function CatalogManager({
       quantity: type === "adjustment" ? Math.abs(nextQuantity - previousQuantity) : quantity,
       previousQuantity,
       nextQuantity,
-      reason: draft.reason.trim() || (type === "entry" ? "Entrée de stock" : type === "exit" ? "Sortie de stock" : "Correction inventaire"),
+      reason: draft.reason.trim() || (type === "entry" ? "EntrÃ©e de stock" : type === "exit" ? "Sortie de stock" : "Correction inventaire"),
       createdAt: new Date().toISOString(),
     };
     onChange({
@@ -4937,6 +5390,11 @@ function CatalogManager({
       trackStock: true,
       stockQuantity: nextQuantity,
       stockMovements: [movement, ...(item.stockMovements || [])].slice(0, 30),
+    });
+    setItemDrafts((drafts) => {
+      const next = { ...drafts };
+      delete next[item.id];
+      return next;
     });
     setMovementDrafts((drafts) => ({ ...drafts, [item.id]: { quantity: "", reason: "" } }));
   };
@@ -4949,7 +5407,7 @@ function CatalogManager({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rechercher un article, une prestation, une catégorie..."
+            placeholder="Rechercher un article, une prestation, une catÃ©gorie..."
           />
         </div>
         <select
@@ -4964,12 +5422,12 @@ function CatalogManager({
           <option value="untracked">Sans suivi de stock</option>
         </select>
         <button onClick={onCreate}>
-          <Plus size={17} /> Nouvel élément
+          <Plus size={17} /> Nouvel Ã©lÃ©ment
         </button>
       </div>
       <div className="stockSummary">
         <div>
-          <span>Éléments</span>
+          <span>Ã‰lÃ©ments</span>
           <strong>{items.length}</strong>
         </div>
         <div>
@@ -4986,19 +5444,31 @@ function CatalogManager({
         </div>
       </div>
       <div className="catalogList">
-        {filtered.map((item) => (
+        {filtered.map((item) => {
+          const draft = itemDraft(item);
+          const suggestedPrice = suggestedSalePriceHt(draft.purchasePrice, company.corporateTaxRate);
+          return (
           <article key={item.id} className="catalogRow">
             <div className="catalogMain">
               <div className="catalogRowHeader">
                 <div>
-                  <strong>{item.name || "Élément sans nom"}</strong>
-                  <span>{item.category || "Sans catégorie"}</span>
+                  <strong>{item.name || "Ã‰lÃ©ment sans nom"}</strong>
+                  <span>{item.category || "Sans catÃ©gorie"}</span>
                 </div>
-                <span className={`statusBadge ${stockTone(item)}`}>{stockLabel(item)}</span>
+                <span className={`statusBadge ${stockTone(draft)}`}>{stockLabel(draft)}</span>
+                <button
+                  className="iconButton"
+                  title="Enregistrer cet Ã©lÃ©ment"
+                  aria-label="Enregistrer cet Ã©lÃ©ment"
+                  disabled={!isItemDirty(item)}
+                  onClick={() => saveItemDraft(item)}
+                >
+                  <Save size={16} />
+                </button>
                 <button
                   className="iconButton dangerIcon"
-                  title="Supprimer cet élément"
-                  aria-label="Supprimer cet élément"
+                  title="Supprimer cet Ã©lÃ©ment"
+                  aria-label="Supprimer cet Ã©lÃ©ment"
                   onClick={() => onDelete(item)}
                 >
                   <Trash2 size={16} />
@@ -5009,23 +5479,23 @@ function CatalogManager({
                   Nom
                   <input
                     placeholder="Ex: Pose et ajustements"
-                    value={item.name}
+                    value={draft.name}
                     onChange={(event) => patch(item, { name: event.target.value })}
                   />
                 </label>
                 <label>
-                  Catégorie
+                  CatÃ©gorie
                   <input
                     placeholder="Ex. : pose, fabrication"
-                    value={item.category}
+                    value={draft.category}
                     onChange={(event) => patch(item, { category: event.target.value })}
                   />
                 </label>
                 <label>
-                  Unité
+                  UnitÃ©
                   <input
                     placeholder="u, h, ml, m2"
-                    value={item.unit}
+                    value={draft.unit}
                     onChange={(event) => patch(item, { unit: event.target.value, stockUnit: event.target.value })}
                   />
                 </label>
@@ -5034,7 +5504,7 @@ function CatalogManager({
                   <input
                     type="number"
                     placeholder="0.00"
-                    value={item.price || ""}
+                    value={draft.price || ""}
                     onChange={(event) => patch(item, { price: Number(event.target.value) })}
                   />
                 </label>
@@ -5043,7 +5513,7 @@ function CatalogManager({
                   <input
                     type="number"
                     placeholder="0 = main d'oeuvre"
-                    value={item.purchasePrice || ""}
+                    value={draft.purchasePrice || ""}
                     onChange={(event) => patch(item, { purchasePrice: Number(event.target.value) })}
                   />
                 </label>
@@ -5053,31 +5523,36 @@ function CatalogManager({
                     <input
                       type="number"
                       placeholder="20"
-                      value={item.vatRate || ""}
+                      value={draft.vatRate || ""}
                       onChange={(event) => patch(item, { vatRate: Number(event.target.value) })}
                     />
                     <span>%</span>
                   </span>
                 </label>
               </div>
+              <div className="catalogSuggestion">
+                <span>Prix vente conseillÃ© HT</span>
+                <strong>{suggestedPrice > 0 ? currency(suggestedPrice) : "Non calculÃ©"}</strong>
+                <small>Marge nette min. 30% aprÃ¨s {company.corporateTaxRate || 0}% d'imposition</small>
+              </div>
             </div>
             <div className="stockBlock">
               <label className="stockToggle">
                 <input
                   type="checkbox"
-                  checked={item.trackStock}
-                  onChange={(event) => patch(item, { trackStock: event.target.checked, stockUnit: item.unit })}
+                  checked={draft.trackStock}
+                  onChange={(event) => patch(item, { trackStock: event.target.checked, stockUnit: draft.unit })}
                 />
                 Suivi du stock
               </label>
-              {item.trackStock && (
+              {draft.trackStock && (
                 <>
                   <div className="stockFields">
                     <label>
                       Stock actuel
                       <input
                         type="number"
-                        value={item.stockQuantity || ""}
+                        value={draft.stockQuantity || ""}
                         onChange={(event) => patch(item, { stockQuantity: Number(event.target.value) })}
                       />
                     </label>
@@ -5085,24 +5560,24 @@ function CatalogManager({
                       Stock minimum
                       <input
                         type="number"
-                        value={item.stockMinimum || ""}
+                        value={draft.stockMinimum || ""}
                         onChange={(event) => patch(item, { stockMinimum: Number(event.target.value) })}
                       />
                     </label>
                     <div className="stockUnitReadout">
-                      <span>Unité stock</span>
-                      <strong>{item.unit || "u"}</strong>
+                      <span>UnitÃ© stock</span>
+                      <strong>{draft.unit || "u"}</strong>
                     </div>
                     <label>
                       Fournisseur
                       <select
-                        value={item.supplierId || ""}
+                        value={draft.supplierId || ""}
                         onChange={(event) => {
                           const supplier = suppliers.find((entry) => entry.id === event.target.value);
                           patch(item, { supplierId: supplier?.id, supplier: supplier?.name || "" });
                         }}
                       >
-                        <option value="">Non rattaché</option>
+                        <option value="">Non rattachÃ©</option>
                         {[...suppliers]
                           .sort((a, b) => a.name.localeCompare(b.name, "fr"))
                           .map((supplier) => (
@@ -5115,8 +5590,8 @@ function CatalogManager({
                     <label>
                       Emplacement
                       <input
-                        placeholder="Stock, dépôt..."
-                        value={item.location}
+                        placeholder="Atelier, dÃ©pÃ´t..."
+                        value={draft.location}
                         onChange={(event) => patch(item, { location: event.target.value })}
                       />
                     </label>
@@ -5126,7 +5601,7 @@ function CatalogManager({
                     type="button"
                     onClick={() => setMovementOpen((open) => ({ ...open, [item.id]: !open[item.id] }))}
                   >
-                    {movementOpen[item.id] ? "Masquer entrées / sorties" : "Entrées / sorties"}
+                    {movementOpen[item.id] ? "Masquer entrÃ©es / sorties" : "EntrÃ©es / sorties"}
                   </button>
                   {movementOpen[item.id] && (
                     <div className="stockMovementPanel">
@@ -5134,7 +5609,7 @@ function CatalogManager({
                         <input
                           type="number"
                           min="0"
-                          placeholder="Qté"
+                          placeholder="QtÃ©"
                           value={movementDraft(item.id).quantity}
                           onChange={(event) => patchMovementDraft(item.id, { quantity: event.target.value })}
                         />
@@ -5143,23 +5618,23 @@ function CatalogManager({
                           value={movementDraft(item.id).reason}
                           onChange={(event) => patchMovementDraft(item.id, { reason: event.target.value })}
                         />
-                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "entry")}>
-                          Entrée
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(draft, "entry")}>
+                          EntrÃ©e
                         </button>
-                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "exit")}>
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(draft, "exit")}>
                           Sortie
                         </button>
-                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(item, "adjustment")}>
+                        <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(draft, "adjustment")}>
                           Corriger
                         </button>
                       </div>
-                      {!!item.stockMovements?.length && (
+                      {!!draft.stockMovements?.length && (
                         <div className="stockHistory">
-                          {item.stockMovements.slice(0, 3).map((movement) => (
+                          {draft.stockMovements.slice(0, 3).map((movement) => (
                             <span key={movement.id}>
                               {formatShortDate(movement.createdAt)} : {movement.previousQuantity}
                               {" -> "}
-                              {movement.nextQuantity} {item.unit || "u"} ({movement.reason})
+                              {movement.nextQuantity} {draft.unit || "u"} ({movement.reason})
                             </span>
                           ))}
                         </div>
@@ -5170,11 +5645,12 @@ function CatalogManager({
               )}
             </div>
           </article>
-        ))}
+        );
+        })}
         {!filtered.length && (
           <div className="emptyRows">
             {items.length
-              ? "Aucun élément ne correspond à cette recherche ou à ce filtre."
+              ? "Aucun Ã©lÃ©ment ne correspond Ã  cette recherche ou Ã  ce filtre."
               : "Le catalogue est vide. Ajoutez un premier article ou une prestation."}
           </div>
         )}
@@ -5188,26 +5664,35 @@ const clientCreateDocumentTypes: DocumentType[] = ["quote", "order", "invoice"];
 
 function ClientFolder({
   client,
+  clients,
   documents,
   readOnly,
   canDelete,
   canCreateDocument,
   onChange,
   onDelete,
+  onCreateSubClient,
+  onSelectSubClient,
   onOpenDocument,
   onCreateDocument,
 }: {
   client: Client;
+  clients: Client[];
   documents: BusinessDocument[];
   readOnly: boolean;
   canDelete: boolean;
   canCreateDocument: boolean;
-  onChange: (client: Client) => Promise<boolean>;
+  onChange: (client: Client) => void;
   onDelete: (client: Client) => void;
+  onCreateSubClient: () => void;
+  onSelectSubClient: (id: string) => void;
   onOpenDocument: (id: string) => void;
   onCreateDocument: (type: DocumentType) => void;
 }) {
-  const [section, setSection] = useState<"profile" | "documents">("profile");
+  const subClients = clients.filter((entry) => entry.parentId === client.id).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  const parentClient = client.parentId ? clients.find((entry) => entry.id === client.parentId) : undefined;
+  const [clientTab, setClientTab] = useState<"card" | "subClients">("card");
+  useEffect(() => setClientTab("card"), [client.id]);
   const invoiceDue = documents.reduce((sum, doc) => {
     if (doc.type !== "invoice") return sum;
     return sum + paymentSummary(doc).remainingAmount;
@@ -5236,38 +5721,75 @@ function ClientFolder({
         )}
       </div>
 
-      <div className="clientFolderSummary">
-        <span>{documents.length} document(s)</span>
-        <span>{currency(totalBusiness)} TTC</span>
-        <span>{invoiceDue > 0 ? `${currency(invoiceDue)} à encaisser` : "Rien à encaisser"}</span>
-        <span>Dernière activité : {lastActivity}</span>
-      </div>
-
-      <div className="clientFolderTabs" role="tablist" aria-label="Sections du dossier client">
-        <button type="button" className={section === "profile" ? "active" : ""} onClick={() => setSection("profile")}>
-          Fiche
-        </button>
-        <button type="button" className={section === "documents" ? "active" : ""} onClick={() => setSection("documents")}>
-          Documents
-        </button>
+      <div className="clientFolderKpis">
+        <div>
+          <span>Documents</span>
+          <strong>{documents.length}</strong>
+        </div>
+        <div>
+          <span>Volume TTC</span>
+          <strong>{currency(totalBusiness)}</strong>
+        </div>
+        <div>
+          <span>À encaisser</span>
+          <strong>{currency(invoiceDue)}</strong>
+        </div>
+        <div>
+          <span>Dernière activité</span>
+          <strong>{lastActivity}</strong>
+        </div>
       </div>
 
       <div className="clientFolderBody">
-        {section === "profile" ? (
-          <ClientCard client={client} readOnly={readOnly} canDelete={canDelete} onChange={onChange} onDelete={onDelete} />
-        ) : (
-          <section className="clientDocumentsPanel">
-            {documents.length ? (
-              <div className="clientDocumentGroups">
-                {clientDocumentTypes.map((type) => {
-                  const group = documents.filter((doc) => doc.type === type);
-                  if (!group.length) return null;
-                  return (
-                    <div className="clientDocumentGroup" key={type}>
-                      <div className="clientDocumentGroupTitle">
-                        <strong>{labels[type]}</strong>
-                        <span>{group.length}</span>
-                      </div>
+        <div className="clientFolderSide">
+          <div className="clientFolderTabs" role="tablist" aria-label="Sections du dossier client">
+            <button type="button" className={clientTab === "card" ? "active" : ""} onClick={() => setClientTab("card")}>
+              Fiche
+            </button>
+            <button type="button" className={clientTab === "subClients" ? "active" : ""} onClick={() => setClientTab("subClients")}>
+              Sous-clients <span>{subClients.length}</span>
+            </button>
+          </div>
+          {clientTab === "card" ? (
+            <ClientCard client={client} readOnly={readOnly} canDelete={canDelete} onChange={onChange} onDelete={onDelete} />
+          ) : (
+            <section className="subClientPanel">
+              <div className="panelTitle">
+                <h3>Sous-clients</h3>
+                <button type="button" className="ghost subtleButton" disabled={!canCreateDocument} onClick={onCreateSubClient}>
+                  <UserPlus size={16} /> Ajouter
+                </button>
+              </div>
+              {subClients.length ? (
+                <div className="subClientList">
+                  {subClients.map((subClient) => (
+                    <button key={subClient.id} type="button" className="subClientRow" onClick={() => onSelectSubClient(subClient.id)}>
+                      <strong>{subClient.name || "Sous-client sans nom"}</strong>
+                      <small>{subClient.email || subClient.phone || subClient.number}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="emptyRows compactEmpty">Aucun sous-client.</div>
+              )}
+            </section>
+          )}
+        </div>
+        <section className="clientDocumentsPanel">
+          <div className="panelTitle">
+            <h3>Documents du client</h3>
+          </div>
+          {documents.length ? (
+            <div className="clientDocumentGroups">
+              {clientDocumentTypes.map((type) => {
+                const group = documents.filter((doc) => doc.type === type);
+                return (
+                  <div className="clientDocumentGroup" key={type}>
+                    <div className="clientDocumentGroupTitle">
+                      <strong>{labels[type]}</strong>
+                      <span>{group.length}</span>
+                    </div>
+                    {group.length ? (
                       <div className="clientDocumentRows">
                         {group.map((doc) => {
                           const sum = totals(doc.lines).totalTtc;
@@ -5286,19 +5808,21 @@ function ClientFolder({
                           );
                         })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="emptyState clientDocumentsEmpty">
-                <FileText size={38} />
-                <h2>Aucun document client</h2>
-                <p>Créez un devis, un bon de commande ou une facture depuis ce dossier.</p>
-              </div>
-            )}
-          </section>
-        )}
+                    ) : (
+                      <div className="emptyRows compactEmpty">Aucun document.</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="emptyState clientDocumentsEmpty">
+              <FileText size={38} />
+              <h2>Aucun document client</h2>
+              <p>Créez un devis, un bon de commande ou une facture depuis ce dossier.</p>
+            </div>
+          )}
+        </section>
       </div>
     </section>
   );
@@ -5314,50 +5838,22 @@ function ClientCard({
   client: Client;
   readOnly: boolean;
   canDelete: boolean;
-  onChange: (client: Client) => Promise<boolean>;
+  onChange: (client: Client) => void;
   onDelete: (client: Client) => void;
 }) {
   const [draft, setDraft] = useState(client);
-  const [saving, setSaving] = useState(false);
-  const draftSignature = [
-    client.id,
-    client.number,
-    client.type,
-    client.name,
-    client.contact,
-    client.email,
-    client.phone,
-    client.address,
-    client.postalCode,
-    client.city,
-    client.notes,
-  ].join("\u0000");
-  useEffect(() => setDraft(client), [draftSignature]);
+  useEffect(() => setDraft(client), [client.id]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(client);
   const patch = (partial: Partial<Client>) => setDraft((current) => ({ ...current, ...partial }));
-  async function saveClient() {
-    if (readOnly || saving) return;
-    setSaving(true);
-    const saved = await onChange({ ...draft, name: draft.name.trim() || "Client à renseigner" });
-    setSaving(false);
-    if (saved) setDraft({ ...draft, name: draft.name.trim() || "Client à renseigner" });
-  }
   return (
     <article className="clientCard">
       <div className="cardHeader">
         <strong>{draft.number}</strong>
-        <div className="clientCardActions">
-          {!readOnly && (
-            <button className="ghost subtleButton" type="button" disabled={saving || !dirty} onClick={() => void saveClient()}>
-              <Save size={16} /> {saving ? "Enregistrement..." : "Enregistrer"}
-            </button>
-          )}
-          {canDelete && (
-            <button className="iconButton" type="button" onClick={() => onDelete(draft)}>
-              <Trash2 size={16} />
-            </button>
-          )}
-        </div>
+        {canDelete && (
+          <button className="iconButton" onClick={() => onDelete(client)}>
+            <Trash2 size={16} />
+          </button>
+        )}
       </div>
       <label>
         Type
@@ -5427,26 +5923,32 @@ function ClientCard({
           onChange={(event) => patch({ notes: event.target.value })}
         />
       </label>
+      {!readOnly && (
+        <button type="button" className="saveButton" disabled={!dirty} onClick={() => onChange(draft)}>
+          <Save size={17} /> Enregistrer
+        </button>
+      )}
     </article>
   );
 }
 
 const companyIdentityFields: Array<[keyof CompanySettings, string, "text" | "number", string]> = [
-  ["name", "Nom commercial", "text", "Votre société"],
+  ["name", "Nom commercial", "text", "Votre sociÃ©tÃ©"],
   ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
   ["siret", "SIRET", "text", "123 456 789 00010"],
-  ["vatNumber", "N° TVA", "text", "FR..."],
+  ["vatNumber", "NÂ° TVA", "text", "FR..."],
   ["address", "Adresse", "text", "12 rue des Copeaux"],
   ["postalCode", "Code postal", "text", "75000"],
   ["city", "Ville", "text", "Paris"],
-  ["phone", "Téléphone", "text", "01 23 45 67 89"],
+  ["phone", "TÃ©lÃ©phone", "text", "01 23 45 67 89"],
   ["email", "Email", "text", "contact@societe.fr"],
   ["website", "Site web", "text", "https://..."],
   ["iban", "IBAN", "text", "FR76..."],
   ["bic", "BIC", "text", "ABCDEFGH"],
-  ["quoteValidityDays", "Validité devis (jours)", "number", "30"],
-  ["defaultVatRate", "TVA par défaut", "number", "20"],
-  ["defaultDepositRate", "Acompte par défaut", "number", "30"],
+  ["quoteValidityDays", "ValiditÃ© devis (jours)", "number", "30"],
+  ["defaultVatRate", "TVA par dÃ©faut", "number", "20"],
+  ["defaultDepositRate", "Acompte par dÃ©faut", "number", "30"],
+  ["corporateTaxRate", "Imposition societe", "number", "25"],
 ];
 
 function CompanySettingsEditor({
@@ -5507,7 +6009,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "identity" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> Enregistré
+                <Check size={16} /> EnregistrÃ©
               </span>
             )}
             <button
@@ -5517,7 +6019,7 @@ function CompanySettingsEditor({
               onClick={saveIdentity}
             >
               {savedBlock === "identity" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "identity" ? "Enregistrement…" : "Enregistrer"}
+              {savingBlock === "identity" ? "Enregistrementâ€¦" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -5526,8 +6028,8 @@ function CompanySettingsEditor({
       <section className="companySettingsBlock accountingSettingsBlock">
         <div className="companySettingsBlockTitle">
           <div>
-            <strong>Comptabilité</strong>
-            <span>Réglage simple utilisé dans le PDF du livre des comptes.</span>
+            <strong>ComptabilitÃ©</strong>
+            <span>RÃ©glage simple utilisÃ© dans le PDF du livre des comptes.</span>
           </div>
         </div>
         <label className="settingsToggle">
@@ -5538,15 +6040,15 @@ function CompanySettingsEditor({
             onChange={(event) => setIncludeVatInNetEstimateDraft(event.target.checked)}
           />
           <span>
-            <strong>Déduire la TVA du net final estimé</strong>
-            <small>Activé : lecture trésorerie. Désactivé : résultat après impôt, TVA suivie séparément.</small>
+            <strong>DÃ©duire la TVA du net final estimÃ©</strong>
+            <small>ActivÃ© : lecture trÃ©sorerie. DÃ©sactivÃ© : rÃ©sultat aprÃ¨s impÃ´t, TVA suivie sÃ©parÃ©ment.</small>
           </span>
         </label>
         {!readOnly && (
           <div className="settingsSaveAction">
             {savedBlock === "accounting" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> Enregistré
+                <Check size={16} /> EnregistrÃ©
               </span>
             )}
             <button
@@ -5556,7 +6058,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("accounting", { ...company, includeVatInNetEstimate: includeVatInNetEstimateDraft })}
             >
               {savedBlock === "accounting" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "accounting" ? "Enregistrement…" : "Enregistrer"}
+              {savingBlock === "accounting" ? "Enregistrementâ€¦" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -5567,7 +6069,7 @@ function CompanySettingsEditor({
           Conditions de paiement
           <textarea
             disabled={readOnly}
-            placeholder="Ex. : 30 % d'acompte à la commande..."
+            placeholder="Ex. : 30 % d'acompte Ã  la commande..."
             value={paymentTermsDraft}
             onChange={(event) => setPaymentTermsDraft(event.target.value)}
           />
@@ -5576,7 +6078,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "payment" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> Enregistré
+                <Check size={16} /> EnregistrÃ©
               </span>
             )}
             <button
@@ -5586,7 +6088,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("payment", { ...company, paymentTerms: paymentTermsDraft })}
             >
               {savedBlock === "payment" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "payment" ? "Enregistrement…" : "Enregistrer"}
+              {savingBlock === "payment" ? "Enregistrementâ€¦" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -5594,10 +6096,10 @@ function CompanySettingsEditor({
 
       <section className="companySettingsBlock">
         <label className="fullLabel">
-          Note par défaut
+          Note par dÃ©faut
           <textarea
             disabled={readOnly}
-            placeholder="Note affichée sur les nouveaux documents"
+            placeholder="Note affichÃ©e sur les nouveaux documents"
             value={notesDraft}
             onChange={(event) => setNotesDraft(event.target.value)}
           />
@@ -5606,7 +6108,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "notes" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> Enregistré
+                <Check size={16} /> EnregistrÃ©
               </span>
             )}
             <button
@@ -5616,7 +6118,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("notes", { ...company, notes: notesDraft })}
             >
               {savedBlock === "notes" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "notes" ? "Enregistrement…" : "Enregistrer"}
+              {savingBlock === "notes" ? "Enregistrementâ€¦" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -5656,3 +6158,4 @@ function FormGrid<T extends CompanySettings>({
     </div>
   );
 }
+

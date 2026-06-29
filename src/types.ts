@@ -24,12 +24,14 @@ export interface CompanySettings {
   defaultVatRate: number;
   defaultDepositRate: number;
   includeVatInNetEstimate: boolean;
+  corporateTaxRate?: number;
   notes: string;
 }
 
 export interface Client {
   id: string;
   number: string;
+  parentId?: string;
   type: "particulier" | "professionnel";
   name: string;
   contact: string;
