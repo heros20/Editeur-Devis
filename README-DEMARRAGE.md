@@ -18,22 +18,22 @@ Le lanceur utilise d'abord la version portable si elle existe, sinon il demarre 
 release\Devix-1.0.2-Portable.exe
 ```
 
-## Utiliser sur cle USB
+## Utiliser sur clé USB
 
-Copier ces elements sur la cle:
+Copier ces éléments sur la clé :
 
 ```text
 release\Devix-1.0.2-Portable.exe
 LANCER-DEVIX.bat
 ```
 
-Au premier lancement portable, Devix cree automatiquement ce dossier a cote de l'executable:
+Au premier lancement portable, Devix crée automatiquement ce dossier à côté de l'exécutable :
 
 ```text
 Devix-data
 ```
 
-Ce dossier contient les donnees locales, les pieces jointes et les sauvegardes locales. Pour deplacer Devix, copier l'executable portable et `Devix-data` ensemble.
+Ce dossier contient les données locales, les pièces jointes et les sauvegardes locales. Pour déplacer Devix, copier l'exécutable portable et `Devix-data` ensemble.
 
 ## Lancer depuis le terminal
 
@@ -48,7 +48,7 @@ npm run build
 npm start
 ```
 
-## Regenerer la version portable
+## Régénérer la version portable
 
 ```bash
 npm run portable

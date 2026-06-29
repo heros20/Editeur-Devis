@@ -205,7 +205,7 @@ const browserApi: DevixApi = {
     return { removed: true };
   },
   async emailPdf(payload) {
-    console.warn("Les pieces jointes PDF necessitent l'application de bureau.");
+    console.warn("Les pièces jointes PDF nécessitent l'application de bureau.");
     const printWindow = window.open("", "_blank", "width=920,height=1100");
     if (printWindow) {
       printWindow.document.open();

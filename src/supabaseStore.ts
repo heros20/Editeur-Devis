@@ -146,13 +146,21 @@ function assertRemoteError(error: unknown) {
 }
 
 function authRedirectUrl() {
-  if (configuredAuthRedirectUrl) return configuredAuthRedirectUrl;
-  if (desktopAuthBridgeUrl) return desktopAuthBridgeUrl;
-  return window.location.origin;
+  if (isDesktopRuntime()) {
+    return configuredAuthRedirectUrl && isDesktopAuthRedirect(configuredAuthRedirectUrl)
+      ? configuredAuthRedirectUrl
+      : desktopAuthBridgeUrl || configuredAuthRedirectUrl;
+  }
+  if (configuredAuthRedirectUrl && !isDesktopAuthRedirect(configuredAuthRedirectUrl)) return configuredAuthRedirectUrl;
+  return `${window.location.origin}/`;
 }
 
 function isDesktopRuntime() {
   return Boolean(window.devixApi) || window.location.protocol === "devix:";
+}
+
+function isDesktopAuthRedirect(url: string) {
+  return url.startsWith("devix:") || url.includes("/functions/v1/auth-callback") || url.startsWith("http://127.0.0.1:43177/auth-callback");
 }
 
 function cleanAuthUrl() {
@@ -182,7 +190,8 @@ export async function getCurrentSession() {
 
 export async function completeOAuthRedirect() {
   if (!supabaseConfigured) return null;
-  const params = new URLSearchParams(window.location.search);
+  const hashParams = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  const params = new URLSearchParams(window.location.search || hashParams);
   const code = params.get("code");
   const errorDescription = params.get("error_description") || params.get("error");
   if (errorDescription) {
@@ -220,7 +229,7 @@ export async function signUpWithPassword(email: string, password: string) {
   const availabilityPayload = availability as { available?: boolean; error?: string } | null;
   if (availabilityPayload?.error) throw new Error(availabilityPayload.error);
   if (availabilityPayload && availabilityPayload.available === false) {
-    throw new Error("Un compte existe deja avec cette adresse email. Connectez-vous ou utilisez mot de passe oublie.");
+    throw new Error("Un compte existe déjà avec cette adresse email. Connectez-vous ou utilisez mot de passe oublié.");
   }
 
   const { data, error } = await supabase.auth.signUp({

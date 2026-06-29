@@ -108,6 +108,10 @@
         }, 1400);
       }
 
+      function continueOnSite() {
+        window.location.replace(window.location.origin + "/" + (window.location.search || window.location.hash || ""));
+      }
+
       async function canReachDevix() {
         const controller = new AbortController();
         const timeout = window.setTimeout(() => controller.abort(), 900);
@@ -125,7 +129,7 @@
         if (authError) return;
         const reachable = await canReachDevix();
         if (!reachable) {
-          fallback.hidden = false;
+          continueOnSite();
           return;
         }
         try {
@@ -133,7 +137,7 @@
           status.textContent = "Compte confirme dans Devix. Fermeture de cette page...";
           closeThisTab();
         } catch {
-          fallback.hidden = false;
+          continueOnSite();
         }
       }
 

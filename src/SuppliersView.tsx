@@ -279,21 +279,6 @@ export function SuppliersView({
             )}
             {linkedExpenses.length > 0 && (
               <div className="supplierLinkedData">
-                {false && linkedItems.length > 0 && (
-                  <section>
-                    <h3>Articles du catalogue</h3>
-                    <div>
-                      {linkedItems.map((item) => (
-                        <span key={item.id}>
-                          <strong>{item.name}</strong>
-                          <small>
-                            {item.category || "Sans catégorie"} · {currency(item.purchasePrice)} HT
-                          </small>
-                        </span>
-                      ))}
-                    </div>
-                  </section>
-                )}
                 {linkedExpenses.length > 0 && (
                   <section>
                     <h3>Dépenses récentes</h3>

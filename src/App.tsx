@@ -1,4 +1,4 @@
-﻿import {
+import {
   ArrowLeft,
   Archive,
   Building2,
@@ -19,6 +19,7 @@
   LoaderCircle,
   LogOut,
   Mail,
+  Menu,
   PackageCheck,
   Palette,
   Paperclip,
@@ -33,6 +34,7 @@
   Truck,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -171,10 +173,10 @@ const allDashboardWidgets: Array<{ id: DashboardWidgetId; label: string }> = [
   { id: "quotes", label: "Devis" },
   { id: "orders", label: "Commandes" },
   { id: "invoices", label: "Factures" },
-  { id: "pending", label: "A encaisser" },
+  { id: "pending", label: "À encaisser" },
   { id: "status", label: "Suivi des affaires" },
-  { id: "due", label: "Echeances" },
-  { id: "recent", label: "Activite recente" },
+  { id: "due", label: "Échéances" },
+  { id: "recent", label: "Activité récente" },
   { id: "stock", label: "Articles et stock" },
   { id: "clients", label: "Clients" },
   { id: "purchases", label: "Achats" },
@@ -200,9 +202,9 @@ function loadDashboardWidgets(): DashboardWidgetId[] {
 
 const roleLabels: Record<WorkspaceRole, string> = {
   superadmin: "Superadmin",
-  owner: "PropriÃ©taire",
+  owner: "Propriétaire",
   admin: "Admin",
-  editor: "Ã‰dition",
+  editor: "Édition",
   viewer: "Lecture",
 };
 
@@ -356,6 +358,7 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [view, setView] = useState<View>("dashboard");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidgetId[]>(loadDashboardWidgets);
   const [selectedId, setSelectedId] = useState("");
   const [documentBackView, setDocumentBackView] = useState<"documents" | "clients" | "archives">("documents");
@@ -410,8 +413,8 @@ export function App() {
     if (message.includes("invalid login credentials")) return "Email ou mot de passe incorrect.";
     if (message.includes("email not confirmed")) return "Confirmez votre email avant de vous connecter.";
     if (message.includes("configuration supabase absente")) return raw;
-    if (message.includes("existe deja") || message.includes("already registered") || message.includes("already exists")) {
-      return "Un compte existe deja avec cette adresse email. Connectez-vous ou utilisez mot de passe oublie.";
+    if (message.includes("existe déjà") || message.includes("already registered") || message.includes("already exists")) {
+      return "Un compte existe déjà avec cette adresse email. Connectez-vous ou utilisez mot de passe oublié.";
     }
     if (message.includes("provider") || message.includes("oauth")) return "Connexion Google pas encore active.";
     if (message.includes("failed to fetch") || message.includes("network")) return "Connexion internet indisponible.";
@@ -459,11 +462,11 @@ export function App() {
         setData(normalizeData(local));
         setLoadError(message);
       } catch (error) {
-        console.error("Impossible de charger les donnÃ©es locales", error);
+        console.error("Impossible de charger les données locales", error);
         if (!active) return;
         setWorkspace(null);
         setData(createDefaultAppData());
-        setLoadError("DonnÃ©es locales indisponibles.");
+        setLoadError("Données locales indisponibles.");
       } finally {
         if (active) setLoaded(true);
       }
@@ -483,9 +486,9 @@ export function App() {
         setData(normalizeData(remote.data));
         setLoadError("");
       } catch (error) {
-        console.error("Impossible de charger les donnÃ©es", error);
+        console.error("Impossible de charger les données", error);
         if (!active) return;
-        await loadLocalStore("DonnÃ©es distantes indisponibles. Mode local actif.");
+        await loadLocalStore("Données distantes indisponibles. Mode local actif.");
         return;
       }
       if (active) setLoaded(true);
@@ -511,9 +514,9 @@ export function App() {
     };
   }, [api]);
 
-  async function persist(next: AppData, message = "EnregistrÃ©", showSuccessNotice = true) {
+  async function persist(next: AppData, message = "Enregistré", showSuccessNotice = true) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return false;
     }
     const previous = data;
@@ -530,7 +533,7 @@ export function App() {
       if (showSuccessNotice) setNotice(message);
       return true;
     } catch (error) {
-      console.error("Impossible d'enregistrer les donnÃ©es", error);
+      console.error("Impossible d'enregistrer les données", error);
       setData(previous);
       setNotice(userFacingError(error, "Sauvegarde indisponible"));
       return false;
@@ -545,7 +548,7 @@ export function App() {
       try {
         count = await reserveRemoteCounter(workspace, type);
       } catch (error) {
-        console.warn("NumÃ©rotation distante indisponible, compteur local utilisÃ©", error);
+        console.warn("Numérotation distante indisponible, compteur local utilisé", error);
       }
     }
     const number = formatBusinessNumber(type, count);
@@ -561,7 +564,7 @@ export function App() {
     };
   }
 
-  function buildClient(number: string, name = "Client Ã  renseigner"): Client {
+  function buildClient(number: string, name = "Client à renseigner"): Client {
     return {
       id: makeId("client"),
       number,
@@ -623,14 +626,14 @@ export function App() {
     return [
       company.name,
       company.legalName,
-      `SIRET : ${company.siret || "Ã  renseigner"}`,
-      `TVA : ${company.vatNumber || "Ã  renseigner"}`,
+      `SIRET : ${company.siret || "à renseigner"}`,
+      `TVA : ${company.vatNumber || "à renseigner"}`,
       `${company.address}\n${company.postalCode} ${company.city}`.trim(),
-      `TÃ©lÃ©phone : ${company.phone}`,
+      `Téléphone : ${company.phone}`,
       `Email: ${company.email}`,
       company.website ? `Site: ${company.website}` : "",
-      `IBAN : ${company.iban || "Ã  renseigner"}`,
-      `BIC : ${company.bic || "Ã  renseigner"}`,
+      `IBAN : ${company.iban || "à renseigner"}`,
+      `BIC : ${company.bic || "à renseigner"}`,
       `Conditions : ${company.paymentTerms}`,
     ]
       .filter(Boolean)
@@ -814,7 +817,7 @@ export function App() {
     return `Stock insuffisant pour transformer ce document : ${details}${suffix}.`;
   }
 
-  function showPermissionNotice(message = "Action rÃ©servÃ©e aux administrateurs.") {
+  function showPermissionNotice(message = "Action réservée aux administrateurs.") {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2200);
   }
@@ -885,7 +888,7 @@ export function App() {
       );
     } catch (error) {
       console.error("Superadmin indisponible", error);
-      setSuperadminError(error instanceof Error ? error.message : "AccÃ¨s superadmin indisponible");
+      setSuperadminError(error instanceof Error ? error.message : "Accès superadmin indisponible");
     } finally {
       setSuperadminBusy(false);
     }
@@ -898,25 +901,25 @@ export function App() {
 
   async function deleteSuperadminWorkspace(target: SuperadminWorkspace) {
     if (!canSuperadmin || superadminBusy) {
-      showPermissionNotice("AccÃ¨s superadmin requis.");
+      showPermissionNotice("Accès superadmin requis.");
       return;
     }
     const expected = `SUPPRIMER ${target.organizationName}`;
     const currentWorkspaceDeleted = workspace?.organizationId === target.organizationId;
     if (
       !confirmDestructiveAction(
-        `Supprimer dÃ©finitivement l'entreprise Â« ${target.organizationName} Â» ? Tous ses documents, comptes, achats et accÃ¨s seront supprimÃ©s.`
+        `Supprimer définitivement l'entreprise « ${target.organizationName} » ? Tous ses documents, comptes, achats et accès seront supprimés.`
       )
     ) {
       return;
     }
     const confirmed = await requestTypedConfirmation(
       "Confirmer la suppression",
-      `DerniÃ¨re vÃ©rification : tapez exactement Â« ${expected} Â» pour confirmer.`,
+      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
       expected
     );
     if (!confirmed) {
-      const message = "Suppression annulÃ©e : confirmation incorrecte.";
+      const message = "Suppression annulée : confirmation incorrecte.";
       setSuperadminError(message);
       showPermissionNotice(message);
       return;
@@ -926,7 +929,7 @@ export function App() {
     setSuperadminError("");
     try {
       await deleteSuperadminOrganization(target.organizationId);
-      setNotice(`Entreprise Â« ${target.organizationName} Â» supprimÃ©e`);
+      setNotice(`Entreprise « ${target.organizationName} » supprimée`);
       if (currentWorkspaceDeleted) {
         const remote = await loadRemoteWorkspace();
         setWorkspace(remote.context);
@@ -960,7 +963,7 @@ export function App() {
     try {
       const nextSession = authMode === "signin" ? await signInWithPassword(email, password) : await signUpWithPassword(email, password);
       if (!nextSession) {
-        setAuthMessage("Compte crÃ©Ã©. VÃ©rifiez votre boÃ®te mail pour confirmer l'inscription.");
+        setAuthMessage("Compte créé. Vérifiez votre boîte mail pour confirmer l'inscription.");
       } else {
         const remote = await loadRemoteWorkspace();
         setWorkspace(remote.context);
@@ -1002,7 +1005,7 @@ export function App() {
     setAuthMessage("");
     try {
       await sendPasswordSetupEmail(email);
-      setAuthMessage("Email envoyÃ©. Ouvrez le lien reÃ§u pour dÃ©finir votre mot de passe.");
+      setAuthMessage("Email envoyé. Ouvrez le lien reçu pour définir votre mot de passe.");
     } catch (error) {
       console.error("Envoi du lien mot de passe impossible", error);
       setAuthMessage(userFacingError(error, "Envoi du lien impossible."));
@@ -1023,10 +1026,10 @@ export function App() {
       await updateCurrentUserPassword(accountPassword);
       setAccountPassword("");
       setAccountPasswordConfirm("");
-      setNotice("Mot de passe mis Ã  jour");
+      setNotice("Mot de passe mis à jour");
     } catch (error) {
-      console.error("Mise Ã  jour mot de passe impossible", error);
-      setNotice(userFacingError(error, "Mot de passe impossible Ã  modifier"));
+      console.error("Mise à jour mot de passe impossible", error);
+      setNotice(userFacingError(error, "Mot de passe impossible à modifier"));
     } finally {
       setAccountBusy(false);
       window.setTimeout(() => setNotice(""), 2200);
@@ -1046,10 +1049,10 @@ export function App() {
       setInviteEmail("");
       setDraftClient(null);
       setView("dashboard");
-      setNotice("Compte supprimÃ©");
+      setNotice("Compte supprimé");
     } catch (error) {
       console.error("Suppression du compte impossible", error);
-      setNotice(userFacingError(error, "Compte impossible Ã  supprimer"));
+      setNotice(userFacingError(error, "Compte impossible à supprimer"));
     } finally {
       setAccountBusy(false);
       window.setTimeout(() => setNotice(""), 2200);
@@ -1069,8 +1072,8 @@ export function App() {
       setDraftClient(null);
       setView("dashboard");
     } catch (error) {
-      console.error("DÃ©connexion impossible", error);
-      setNotice("DÃ©connexion indisponible");
+      console.error("Déconnexion impossible", error);
+      setNotice("Déconnexion indisponible");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
@@ -1082,7 +1085,7 @@ export function App() {
     try {
       const invitation = await createTeamInvitation(workspace, inviteEmail, inviteRole);
       setInviteEmail("");
-      setNotice(`Invitation envoyÃ©e Ã  ${invitation.email}`);
+      setNotice(`Invitation envoyée à ${invitation.email}`);
       await refreshTeam();
     } catch (error) {
       console.error("Invitation impossible", error);
@@ -1095,12 +1098,12 @@ export function App() {
 
   async function revokeInvitation(invitation: TeamInvitation) {
     if (!workspace || !canManageTeam || teamBusy) return;
-    if (!confirmDestructiveAction(`Supprimer l'invitation envoyÃ©e Ã  ${invitation.email} ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer l'invitation envoyée à ${invitation.email} ?`)) return;
     setTeamBusy(true);
     try {
       await deleteTeamInvitation(workspace, invitation.id);
       await refreshTeam();
-      setNotice("Invitation supprimÃ©e");
+      setNotice("Invitation supprimée");
     } catch (error) {
       console.error("Suppression invitation impossible", error);
       setNotice(userFacingError(error, "Suppression impossible"));
@@ -1116,7 +1119,7 @@ export function App() {
     try {
       await updateTeamMemberRole(workspace, member.id, role);
       await refreshTeam();
-      setNotice("Droits mis Ã  jour");
+      setNotice("Droits mis à jour");
     } catch (error) {
       console.error("Modification droits impossible", error);
       setNotice(userFacingError(error, "Modification impossible"));
@@ -1133,9 +1136,9 @@ export function App() {
     try {
       await removeTeamMember(workspace, member.id);
       await refreshTeam();
-      setNotice("EmployÃ© retirÃ©");
+      setNotice("Employé retiré");
     } catch (error) {
-      console.error("Retrait employÃ© impossible", error);
+      console.error("Retrait employé impossible", error);
       setNotice(userFacingError(error, "Retrait impossible"));
     } finally {
       setTeamBusy(false);
@@ -1159,10 +1162,10 @@ export function App() {
     if (view === "purchases") return "Achats fournisseurs";
     if (view === "suppliers") return "Fournisseurs";
     if (view === "clients") return "Dossiers clients";
-    if (view === "company") return "Informations sociÃ©tÃ©";
+    if (view === "company") return "Informations société";
     if (view === "archives") return "Archives annuelles";
     if (view === "superadmin") return "Superadmin";
-    return "ParamÃ¨tres";
+    return "Paramètres";
   }
 
   const documentMonthOptions = useMemo(() => {
@@ -1270,7 +1273,7 @@ export function App() {
 
   async function createClient() {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     const client = buildClient(formatBusinessNumber("client", data.counters.client || 1), "Nouveau client");
@@ -1281,7 +1284,7 @@ export function App() {
 
   async function createSubClient(parent: Client) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃƒÂ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     const reserved = await reserveNumber("client", data);
@@ -1293,14 +1296,14 @@ export function App() {
       postalCode: parent.postalCode,
       city: parent.city,
     };
-    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Sous-client crÃƒÂ©ÃƒÂ©");
+    await persist({ ...reserved.data, clients: [client, ...reserved.data.clients] }, "Sous-client créé");
     setSelectedClientId(client.id);
     setView("clients");
   }
 
   async function createDocument(type: DocumentType = "quote", clientId?: string) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     const withClient = clientId && data.clients.some((client) => client.id === clientId) ? { data, clientId } : await ensureClient(data);
@@ -1332,7 +1335,7 @@ export function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} crÃ©Ã©`);
+    await persist({ ...reserved.data, documents: [doc, ...reserved.data.documents] }, `${labels[type]} créé`);
     setSelectedId(doc.id);
     setSelectedClientId(withClient.clientId);
     setDocumentBackView(clientId ? "clients" : "documents");
@@ -1342,7 +1345,7 @@ export function App() {
   async function convertDocument(source: BusinessDocument, type: DocumentType) {
     if (!canConvertDocument(source, type)) {
       showPermissionNotice(
-        isLockedBillingDocument(source) ? "Ce document de facturation est verrouillÃ©." : "Votre accÃ¨s est en lecture seule."
+        isLockedBillingDocument(source) ? "Ce document de facturation est verrouillé." : "Votre accès est en lecture seule."
       );
       return;
     }
@@ -1401,8 +1404,8 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour le modifier."
-          : "Votre accÃ¨s est en lecture seule."
+          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le modifier."
+          : "Votre accès est en lecture seule."
       );
       return;
     }
@@ -1421,11 +1424,11 @@ export function App() {
 
   async function updateDocumentPayment(doc: BusinessDocument) {
     if (!canEditOperations || doc.type !== "invoice") {
-      showPermissionNotice("Encaissement rÃ©servÃ© aux factures.");
+      showPermissionNotice("Encaissement réservé aux factures.");
       return;
     }
     const updated = withPaymentStatus({ ...doc, updatedAt: new Date().toISOString() });
-    await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }, "Paiement enregistrÃ©");
+    await persist({ ...data, documents: data.documents.map((item) => (item.id === doc.id ? updated : item)) }, "Paiement enregistré");
   }
 
   async function advanceStatus(doc: BusinessDocument) {
@@ -1450,8 +1453,8 @@ export function App() {
     if (!canModifyDocument(source)) {
       showPermissionNotice(
         isLockedBillingDocument(source)
-          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour le dupliquer."
-          : "Votre accÃ¨s est en lecture seule."
+          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour le dupliquer."
+          : "Votre accès est en lecture seule."
       );
       return;
     }
@@ -1480,7 +1483,7 @@ export function App() {
 
   async function restorePreviousDocument(doc: BusinessDocument) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     const lastHistory = doc.history[doc.history.length - 1];
@@ -1495,7 +1498,7 @@ export function App() {
     await deleteAttachmentsExcept(doc, restored.attachments);
     await persist(
       { ...data, catalog: nextCatalog, documents: data.documents.map((item) => (item.id === doc.id ? restored : item)) },
-      `${labels[lastHistory.fromType]} ${lastHistory.fromNumber} restaurÃ©`
+      `${labels[lastHistory.fromType]} ${lastHistory.fromNumber} restauré`
     );
     setSelectedId(restored.id);
     setView("documentDetail");
@@ -1503,11 +1506,11 @@ export function App() {
 
   async function deleteDocument(doc: BusinessDocument) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     if (isLockedBillingDocument(doc)) {
-      showPermissionNotice("Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent avant de le supprimer.");
+      showPermissionNotice("Ce document de facturation est verrouillé. Revenez au document précédent avant de le supprimer.");
       return;
     }
     if (!confirmDestructiveAction(`Supprimer ${labels[doc.type].toLowerCase()} ${doc.number} ?`)) return;
@@ -1515,8 +1518,8 @@ export function App() {
     const shouldRestoreOrigin = Boolean(
       lastHistory &&
         (await requestChoiceConfirmation(
-          "RÃ©gÃ©nÃ©rer l'origine",
-          `Voulez-vous rÃ©gÃ©nÃ©rer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`
+          "Régénérer l'origine",
+          `Voulez-vous régénérer le document d'origine : ${labels[lastHistory.fromType]} ${lastHistory.fromNumber} ?`
         ))
     );
     const restored = shouldRestoreOrigin && lastHistory ? restoreDocumentFromHistory(doc, lastHistory) : null;
@@ -1525,7 +1528,7 @@ export function App() {
     const nextDocs = data.documents.filter((item) => item.id !== doc.id);
     await persist(
       { ...data, documents: restored ? [restored, ...nextDocs] : nextDocs },
-      restored ? `${labels[restored.type]} ${restored.number} rÃ©gÃ©nÃ©rÃ©` : "Document supprimÃ©"
+      restored ? `${labels[restored.type]} ${restored.number} régénéré` : "Document supprimé"
     );
     setSelectedId(restored?.id || "");
     setView(restored ? "documentDetail" : "documents");
@@ -1535,8 +1538,8 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour modifier les piÃ¨ces jointes."
-          : "Votre accÃ¨s est en lecture seule."
+          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes."
+          : "Votre accès est en lecture seule."
       );
       return;
     }
@@ -1546,7 +1549,7 @@ export function App() {
       ? await Promise.all(result.attachments.map((attachment) => uploadRemoteAttachment(workspace, doc.id, attachment)))
       : result.attachments;
     await updateDocument({ ...doc, attachments: [...doc.attachments, ...attachments] });
-    setNotice(`${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`);
+    setNotice(`${attachments.length} pièce(s) jointe(s) ajoutée(s)`);
     window.setTimeout(() => setNotice(""), 1800);
   }
 
@@ -1559,9 +1562,9 @@ export function App() {
       const result = await api.openAttachment(attachment);
       if (result.opened) return;
     } catch (error) {
-      console.warn("Ouverture piÃ¨ce jointe impossible", error);
+      console.warn("Ouverture pièce jointe impossible", error);
     }
-    setNotice("PiÃ¨ce jointe introuvable");
+    setNotice("Pièce jointe introuvable");
     window.setTimeout(() => setNotice(""), 2200);
   }
 
@@ -1569,12 +1572,12 @@ export function App() {
     if (!canModifyDocument(doc)) {
       showPermissionNotice(
         isLockedBillingDocument(doc)
-          ? "Ce document de facturation est verrouillÃ©. Revenez au document prÃ©cÃ©dent pour modifier les piÃ¨ces jointes."
-          : "Votre accÃ¨s est en lecture seule."
+          ? "Ce document de facturation est verrouillé. Revenez au document précédent pour modifier les pièces jointes."
+          : "Votre accès est en lecture seule."
       );
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
     try {
       if (workspace) {
         await deleteRemoteAttachment(attachment);
@@ -1582,10 +1585,10 @@ export function App() {
         await api.deleteAttachment(attachment);
       }
     } catch (error) {
-      console.warn("Suppression piÃ¨ce jointe impossible", error);
+      console.warn("Suppression pièce jointe impossible", error);
     } finally {
       await updateDocument({ ...doc, attachments: doc.attachments.filter((item) => item.id !== attachment.id) });
-      setNotice("PiÃ¨ce jointe supprimÃ©e");
+      setNotice("Pièce jointe supprimée");
       window.setTimeout(() => setNotice(""), 2200);
     }
   }
@@ -1601,7 +1604,7 @@ export function App() {
     const client = data.clients.find((item) => item.id === doc.clientId);
     let email = client?.email?.trim() || "";
     if (!email) {
-      const entered = window.prompt("Email du client Ã  ajouter pour cet envoi", email);
+      const entered = window.prompt("Email du client à ajouter pour cet envoi", email);
       if (!entered) return;
       email = entered.trim();
       if (client) {
@@ -1611,7 +1614,7 @@ export function App() {
         }
         await persist(
           { ...data, clients: data.clients.map((item) => (item.id === client.id ? { ...item, email } : item)) },
-          "Email client ajoutÃ©"
+          "Email client ajouté"
         );
       }
     }
@@ -1624,31 +1627,31 @@ export function App() {
       subject: `${labels[doc.type]} ${doc.number}${doc.projectName ? ` - ${doc.projectName}` : ""}`,
       body: "",
     });
-    setNotice(result.opened && !result.fallback ? "Email prÃªt avec PDF joint" : "Impossible de joindre le PDF au mail");
+    setNotice(result.opened && !result.fallback ? "Email prêt avec PDF joint" : "Impossible de joindre le PDF au mail");
     window.setTimeout(() => setNotice(""), result.fallback ? 4200 : 1800);
   }
 
   async function sendPaymentReminder(doc: BusinessDocument, draft: ReminderDraft) {
     if (!canEditOperations || doc.type !== "invoice") {
-      showPermissionNotice("Relance rÃ©servÃ©e aux factures.");
-      return { success: false, message: "Relance rÃ©servÃ©e aux factures." };
+      showPermissionNotice("Relance réservée aux factures.");
+      return { success: false, message: "Relance réservée aux factures." };
     }
 
     const invoice = withPaymentStatus(doc);
     const summary = paymentSummary(invoice);
     if (summary.remainingAmount <= 0.005) {
-      setNotice("Aucun reste dÃ» Ã  relancer");
+      setNotice("Aucun reste dû à relancer");
       window.setTimeout(() => setNotice(""), 2200);
-      return { success: false, message: "Aucun reste dÃ» Ã  relancer." };
+      return { success: false, message: "Aucun reste dû à relancer." };
     }
 
     const client = data.clients.find((item) => item.id === invoice.clientId);
     let email = client?.email?.trim() || "";
     if (!email) {
-      const entered = window.prompt("Email du client Ã  utiliser pour cette relance", email);
-      if (!entered) return { success: false, message: "Relance annulÃ©e : email client absent." };
+      const entered = window.prompt("Email du client à utiliser pour cette relance", email);
+      if (!entered) return { success: false, message: "Relance annulée : email client absent." };
       email = entered.trim();
-      if (!email) return { success: false, message: "Relance annulÃ©e : email client absent." };
+      if (!email) return { success: false, message: "Relance annulée : email client absent." };
     }
 
     const clientForEmail = client ? { ...client, email } : undefined;
@@ -1662,22 +1665,22 @@ export function App() {
       result = await api.emailPdf({ html, defaultPath: name, to: email, subject, body });
     } catch (error) {
       console.error("Relance email impossible", error);
-      setNotice("Relance impossible : gÃ©nÃ©ration PDF Ã©chouÃ©e");
+      setNotice("Relance impossible : génération PDF échouée");
       window.setTimeout(() => setNotice(""), 4200);
-      return { success: false, message: "Relance impossible : gÃ©nÃ©ration PDF Ã©chouÃ©e." };
+      return { success: false, message: "Relance impossible : génération PDF échouée." };
     }
 
     if (!result.opened || result.fallback) {
-      setNotice("Relance non envoyÃ©e : PDF joint indisponible");
+      setNotice("Relance non envoyée : PDF joint indisponible");
       window.setTimeout(() => setNotice(""), 4200);
-      return { success: false, message: "Relance non enregistrÃ©e : PDF joint indisponible." };
+      return { success: false, message: "Relance non enregistrée : PDF joint indisponible." };
     }
 
     const reminder: PaymentReminder = {
       id: makeId("reminder"),
       sentAt: draft.sentAt || todayIso(),
       channel: "email",
-      note: draft.note.trim() || `Relance email - reste dÃ» ${currency(summary.remainingAmount)}`,
+      note: draft.note.trim() || `Relance email - reste dû ${currency(summary.remainingAmount)}`,
     };
     const updated = withPaymentStatus({
       ...invoice,
@@ -1686,16 +1689,16 @@ export function App() {
     });
     await persist(
       { ...data, clients: nextClients, documents: data.documents.map((item) => (item.id === invoice.id ? updated : item)) },
-      "Relance email enregistrÃ©e"
+      "Relance email enregistrée"
     );
-    setNotice("Relance prÃªte avec PDF joint");
+    setNotice("Relance prête avec PDF joint");
     window.setTimeout(() => setNotice(""), 2200);
-    return { success: true, message: "Relance prÃªte avec PDF joint." };
+    return { success: true, message: "Relance prête avec PDF joint." };
   }
 
   async function updateClient(client: Client) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return false;
     }
     const exists = data.clients.some((item) => item.id === client.id);
@@ -1706,20 +1709,20 @@ export function App() {
           counters: { ...data.counters, client: Math.max(data.counters.client || 1, (data.counters.client || 1) + 1) },
           clients: [client, ...data.clients],
         };
-    const saved = await persist(nextData, exists ? "Client enregistrÃ©" : "Client crÃ©Ã©");
+    const saved = await persist(nextData, exists ? "Client enregistré" : "Client créé");
     if (saved && draftClient?.id === client.id) setDraftClient(null);
     return saved;
   }
 
   async function deleteClient(client: Client) {
     if (draftClient?.id === client.id) {
-      if (!confirmDestructiveAction("Abandonner ce nouveau client non enregistrÃ© ?")) return;
+      if (!confirmDestructiveAction("Abandonner ce nouveau client non enregistré ?")) return;
       setDraftClient(null);
       setSelectedClientId(data.clients[0]?.id || "");
       return;
     }
     if (!canDeleteClients) {
-      showPermissionNotice("Suppression des clients rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("Suppression des clients réservée aux administrateurs.");
       return;
     }
     const used = data.documents.some((doc) => doc.clientId === client.id);
@@ -1729,11 +1732,11 @@ export function App() {
       return;
     }
     if (used) {
-      setNotice("Client utilisÃ© dans un document");
+      setNotice("Client utilisé dans un document");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer le client Â« ${client.name || client.number} Â» ?`)) return;
-    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimÃ©");
+    if (!confirmDestructiveAction(`Supprimer le client « ${client.name || client.number} » ?`)) return;
+    await persist({ ...data, clients: data.clients.filter((item) => item.id !== client.id) }, "Client supprimé");
     if (selectedClientId === client.id) setSelectedClientId("");
   }
 
@@ -1765,7 +1768,7 @@ export function App() {
       showPermissionNotice();
       return;
     }
-    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Ã‰lÃ©ment ajoutÃ© au catalogue");
+    await persist({ ...data, catalog: [emptyCatalogItem(data.company.defaultVatRate), ...data.catalog] }, "Élément ajouté au catalogue");
     setView("catalog");
   }
 
@@ -1783,22 +1786,22 @@ export function App() {
       return;
     }
     if (data.purchaseInvoices.some((invoice) => invoice.lines.some((line) => line.catalogItemId === item.id))) {
-      showPermissionNotice("Cet article est utilisÃ© par une facture dâ€™achat et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Cet article est utilisé par une facture d’achat et ne peut pas être supprimé.");
       return;
     }
     if (data.purchaseOrders.some((order) => order.lines.some((line) => line.catalogItemId === item.id))) {
-      showPermissionNotice("Cet article est utilisÃ© par une commande fournisseur et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Cet article est utilisé par une commande fournisseur et ne peut pas être supprimé.");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer Â« ${item.name || "cet Ã©lÃ©ment"} Â» du catalogue ?`)) return;
-    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Ã‰lÃ©ment supprimÃ© du catalogue");
+    if (!confirmDestructiveAction(`Supprimer « ${item.name || "cet élément"} » du catalogue ?`)) return;
+    await persist({ ...data, catalog: data.catalog.filter((entry) => entry.id !== item.id) }, "Élément supprimé du catalogue");
   }
 
   async function copyCompany() {
     const text = companyText(data.company);
     try {
       await navigator.clipboard.writeText(text);
-      setNotice("Informations sociÃ©tÃ© copiÃ©es");
+      setNotice("Informations société copiées");
     } catch {
       const textarea = document.createElement("textarea");
       textarea.value = text;
@@ -1806,14 +1809,14 @@ export function App() {
       textarea.select();
       document.execCommand("copy");
       textarea.remove();
-      setNotice("Informations sociÃ©tÃ© copiÃ©es");
+      setNotice("Informations société copiées");
     }
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function emailCompany() {
     await api.openEmail({
-      subject: `Informations sociÃ©tÃ© - ${data.company.name}`,
+      subject: `Informations société - ${data.company.name}`,
       body: companyText(data.company),
     });
   }
@@ -1832,7 +1835,7 @@ export function App() {
       defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.pdf`,
     });
     if (!result.canceled) {
-      setNotice("Livre de comptes PDF exportÃ©");
+      setNotice("Livre de comptes PDF exporté");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
@@ -1844,19 +1847,19 @@ export function App() {
       defaultPath: `livre-comptes-${period.startDate}-${period.endDate}.xlsx`,
     });
     if (!result.canceled) {
-      setNotice("Livre de comptes Excel exportÃ©");
+      setNotice("Livre de comptes Excel exporté");
       window.setTimeout(() => setNotice(""), 1800);
     }
   }
 
   async function archiveYear(year: number) {
     if (!canManageCompany) {
-      showPermissionNotice("Lâ€™archivage annuel est rÃ©servÃ© aux administrateurs.");
+      showPermissionNotice("L’archivage annuel est réservé aux administrateurs.");
       return false;
     }
     const currentYearValue = new Date().getFullYear();
     if (!Number.isFinite(year) || year >= currentYearValue) {
-      showPermissionNotice("Seule une annÃ©e terminÃ©e peut Ãªtre archivÃ©e.");
+      showPermissionNotice("Seule une année terminée peut être archivée.");
       return false;
     }
 
@@ -1866,13 +1869,13 @@ export function App() {
     const orders = data.purchaseOrders.filter((order) => !isArchived(order) && purchaseOrderYear(order) === year);
     const totalItems = documents.length + expenses.length + invoices.length + orders.length;
     if (!totalItems) {
-      showPermissionNotice(`Aucun Ã©lÃ©ment actif trouvÃ© pour ${year}.`);
+      showPermissionNotice(`Aucun élément actif trouvé pour ${year}.`);
       return false;
     }
 
     if (
       !confirmDestructiveAction(
-        `Archiver ${totalItems} Ã©lÃ©ment(s) de ${year} ? Ils disparaÃ®tront des vues actives, mais resteront consultables dans Archives et dans les comptes.`
+        `Archiver ${totalItems} élément(s) de ${year} ? Ils disparaîtront des vues actives, mais resteront consultables dans Archives et dans les comptes.`
       )
     ) {
       return false;
@@ -1881,11 +1884,11 @@ export function App() {
     const expected = `ARCHIVER ${year}`;
     const confirmed = await requestTypedConfirmation(
       "Confirmer l'archivage",
-      `DerniÃ¨re vÃ©rification : tapez exactement Â« ${expected} Â» pour confirmer.`,
+      `Dernière vérification : tapez exactement « ${expected} » pour confirmer.`,
       expected
     );
     if (!confirmed) {
-      showPermissionNotice("Archivage annulÃ© : confirmation incorrecte.");
+      showPermissionNotice("Archivage annulé : confirmation incorrecte.");
       return false;
     }
 
@@ -1907,35 +1910,35 @@ export function App() {
         !isArchived(order) && purchaseOrderYear(order) === year ? { ...order, archivedYear: year, archivedAt, updatedAt: archivedAt } : order
       ),
     });
-    const saved = await persist(next, `AnnÃ©e ${year} archivÃ©e`);
+    const saved = await persist(next, `Année ${year} archivée`);
     if (saved) setSelectedArchiveYear(year);
     return saved;
   }
 
   async function createExpense(expense: BusinessExpense) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return false;
     }
-    return persist({ ...data, expenses: [expense, ...data.expenses] }, "DÃ©pense enregistrÃ©e");
+    return persist({ ...data, expenses: [expense, ...data.expenses] }, "Dépense enregistrée");
   }
 
   async function deleteExpense(expense: BusinessExpense) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return;
     }
     if (expense.purchaseInvoiceId) {
-      showPermissionNotice("Cette dÃ©pense provient dâ€™une facture dâ€™achat. Annulez la validation depuis lâ€™Ã©cran Achats.");
+      showPermissionNotice("Cette dépense provient d’une facture d’achat. Annulez la validation depuis l’écran Achats.");
       return;
     }
-    if (!confirmDestructiveAction(`Supprimer la dÃ©pense Â« ${expense.description} Â» ?`)) return;
-    await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "DÃ©pense supprimÃ©e");
+    if (!confirmDestructiveAction(`Supprimer la dépense « ${expense.description} » ?`)) return;
+    await persist({ ...data, expenses: data.expenses.filter((item) => item.id !== expense.id) }, "Dépense supprimée");
   }
 
   async function saveSupplier(supplier: Supplier) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return false;
     }
     const exists = data.suppliers.some((item) => item.id === supplier.id);
@@ -1952,33 +1955,33 @@ export function App() {
     );
     return persist(
       { ...data, suppliers, expenses, catalog, purchaseInvoices, purchaseOrders },
-      exists ? "Fournisseur mis Ã  jour" : "Fournisseur crÃ©Ã©"
+      exists ? "Fournisseur mis à jour" : "Fournisseur créé"
     );
   }
 
   async function deleteSupplier(supplier: Supplier) {
     if (!canEditOperations) {
-      showPermissionNotice("Votre accÃ¨s est en lecture seule.");
+      showPermissionNotice("Votre accès est en lecture seule.");
       return false;
     }
     if (data.expenses.some((expense) => expense.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisÃ© par une dÃ©pense et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Ce fournisseur est utilisé par une dépense et ne peut pas être supprimé.");
       return false;
     }
     if (data.catalog.some((item) => item.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est liÃ© Ã  un article du catalogue et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Ce fournisseur est lié à un article du catalogue et ne peut pas être supprimé.");
       return false;
     }
     if (data.purchaseInvoices.some((invoice) => invoice.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisÃ© par une facture dâ€™achat et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Ce fournisseur est utilisé par une facture d’achat et ne peut pas être supprimé.");
       return false;
     }
     if (data.purchaseOrders.some((order) => order.supplierId === supplier.id)) {
-      showPermissionNotice("Ce fournisseur est utilisÃ© par une commande fournisseur et ne peut pas Ãªtre supprimÃ©.");
+      showPermissionNotice("Ce fournisseur est utilisé par une commande fournisseur et ne peut pas être supprimé.");
       return false;
     }
-    if (!confirmDestructiveAction(`Supprimer le fournisseur Â« ${supplier.name} Â» ?`)) return false;
-    return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimÃ©");
+    if (!confirmDestructiveAction(`Supprimer le fournisseur « ${supplier.name} » ?`)) return false;
+    return persist({ ...data, suppliers: data.suppliers.filter((item) => item.id !== supplier.id) }, "Fournisseur supprimé");
   }
 
   async function createSupplierCatalogItem(supplier: Supplier) {
@@ -1994,7 +1997,7 @@ export function App() {
       unit: "u",
       stockUnit: "u",
     };
-    await persist({ ...data, catalog: [item, ...data.catalog] }, "Article fournisseur ajoutÃ©");
+    await persist({ ...data, catalog: [item, ...data.catalog] }, "Article fournisseur ajouté");
   }
 
   async function saveSupplierCatalogItem(item: CatalogItem) {
@@ -2009,7 +2012,7 @@ export function App() {
 
   async function savePurchaseOrder(order: PurchaseOrder) {
     if (!canManageCatalog || order.status !== "draft") {
-      showPermissionNotice("La gestion des commandes fournisseur est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("La gestion des commandes fournisseur est réservée aux administrateurs.");
       return false;
     }
     const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
@@ -2018,7 +2021,7 @@ export function App() {
     const purchaseOrders = exists
       ? data.purchaseOrders.map((entry) => (entry.id === order.id ? normalized : entry))
       : [normalized, ...data.purchaseOrders];
-    return persist({ ...data, purchaseOrders }, exists ? "Commande mise Ã  jour" : "Commande fournisseur crÃ©Ã©e");
+    return persist({ ...data, purchaseOrders }, exists ? "Commande mise à jour" : "Commande fournisseur créée");
   }
 
   async function emailPurchaseOrder(order: PurchaseOrder) {
@@ -2032,7 +2035,7 @@ export function App() {
     if (!email) {
       const entered = window.prompt(`Adresse email de ${supplier.name}`, "");
       if (!entered?.trim()) {
-        showPermissionNotice("Lâ€™adresse email du fournisseur est nÃ©cessaire pour envoyer la commande.");
+        showPermissionNotice("L’adresse email du fournisseur est nécessaire pour envoyer la commande.");
         return false;
       }
       email = entered.trim();
@@ -2049,7 +2052,7 @@ export function App() {
       ? data.purchaseOrders.map((entry) => (entry.id === sent.id ? sent : entry))
       : [sent, ...data.purchaseOrders];
     const suppliers = data.suppliers.map((entry) => (entry.id === supplier.id ? supplier : entry));
-    const saved = await persist({ ...data, suppliers, purchaseOrders }, "Commande prÃªte Ã  Ãªtre envoyÃ©e");
+    const saved = await persist({ ...data, suppliers, purchaseOrders }, "Commande prête à être envoyée");
     if (!saved) return false;
     try {
       const result = await api.emailPdf({
@@ -2059,12 +2062,12 @@ export function App() {
         subject: `Bon de commande ${sent.number} - ${data.company.name || "Devix"}`,
         body: `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${sent.number}.\n\nCordialement,\n${data.company.name || ""}`,
       });
-      setNotice(result.opened && !result.fallback ? "Email prÃªt avec le bon de commande joint" : "Email prÃ©parÃ©");
+      setNotice(result.opened && !result.fallback ? "Email prêt avec le bon de commande joint" : "Email préparé");
       window.setTimeout(() => setNotice(""), 2200);
       return result.opened;
     } catch (error) {
       console.error("Envoi du bon de commande impossible", error);
-      setNotice("Impossible dâ€™ouvrir lâ€™email prÃ©parÃ©");
+      setNotice("Impossible d’ouvrir l’email préparé");
       window.setTimeout(() => setNotice(""), 2200);
       return false;
     }
@@ -2072,7 +2075,7 @@ export function App() {
 
   async function receivePurchaseOrder(order: PurchaseOrder) {
     if (!canManageCatalog || order.status !== "draft") {
-      showPermissionNotice("La rÃ©ception de stock est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("La réception de stock est réservée aux administrateurs.");
       return false;
     }
     const supplier = data.suppliers.find((entry) => entry.id === order.supplierId);
@@ -2097,7 +2100,7 @@ export function App() {
         purchaseOrders,
         catalog: applyPurchaseOrderStockImpact(supplierCatalog, normalized, "receive"),
       },
-      "EntrÃ©e en stock enregistrÃ©e"
+      "Entrée en stock enregistrée"
     );
   }
 
@@ -2139,7 +2142,7 @@ export function App() {
         purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
         catalog: order.status === "received" ? supplierCatalog : applyPurchaseOrderStockImpact(supplierCatalog, receivedOrder, "receive"),
       },
-      "Commande transformÃ©e en facture : stock mis Ã  jour"
+      "Commande transformée en facture : stock mis à jour"
     );
   }
 
@@ -2164,7 +2167,7 @@ export function App() {
             : entry
         ),
       },
-      `${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`
+      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
     );
   }
 
@@ -2181,7 +2184,7 @@ export function App() {
             : entry
         ),
       },
-      `${attachments.length} piÃ¨ce(s) jointe(s) ajoutÃ©e(s)`
+      `${attachments.length} pièce(s) jointe(s) ajoutée(s)`
     );
   }
 
@@ -2190,12 +2193,12 @@ export function App() {
       if (workspace) await deleteRemoteAttachment(attachment);
       else await api.deleteAttachment(attachment);
     } catch (error) {
-      console.warn("Suppression piÃ¨ce jointe impossible", error);
+      console.warn("Suppression pièce jointe impossible", error);
     }
   }
 
   async function removePurchaseOrderAttachment(order: PurchaseOrder, attachment: DocumentAttachment) {
-    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
     await deletePurchaseAttachmentFile(attachment);
     await persist(
       {
@@ -2206,12 +2209,12 @@ export function App() {
             : entry
         ),
       },
-      "PiÃ¨ce jointe supprimÃ©e"
+      "Pièce jointe supprimée"
     );
   }
 
   async function removePurchaseInvoiceAttachment(invoice: PurchaseInvoice, attachment: DocumentAttachment) {
-    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la piÃ¨ce jointe Â« ${attachment.name} Â» ?`)) return;
+    if (!canManageCatalog || !confirmDestructiveAction(`Supprimer la pièce jointe « ${attachment.name} » ?`)) return;
     await deletePurchaseAttachmentFile(attachment);
     await persist(
       {
@@ -2226,18 +2229,18 @@ export function App() {
             : entry
         ),
       },
-      "PiÃ¨ce jointe supprimÃ©e"
+      "Pièce jointe supprimée"
     );
   }
 
   async function deletePurchaseOrder(order: PurchaseOrder) {
     if (!canManageCatalog) return false;
     if (order.invoiceId) {
-      showPermissionNotice("Supprimez dâ€™abord la facture associÃ©e Ã  cette commande.");
+      showPermissionNotice("Supprimez d’abord la facture associée à cette commande.");
       return false;
     }
-    const impact = order.status === "received" ? " Le stock sera corrigÃ©." : "";
-    if (!confirmDestructiveAction(`Supprimer la commande Â« ${order.number} Â» ?${impact}`)) return false;
+    const impact = order.status === "received" ? " Le stock sera corrigé." : "";
+    if (!confirmDestructiveAction(`Supprimer la commande « ${order.number} » ?${impact}`)) return false;
     await Promise.all(order.attachments.map(deletePurchaseAttachmentFile));
     return persist(
       {
@@ -2245,7 +2248,7 @@ export function App() {
         purchaseOrders: data.purchaseOrders.filter((entry) => entry.id !== order.id),
         catalog: order.status === "received" ? applyPurchaseOrderStockImpact(data.catalog, order, "cancel") : data.catalog,
       },
-      "Commande fournisseur supprimÃ©e"
+      "Commande fournisseur supprimée"
     );
   }
 
@@ -2255,13 +2258,13 @@ export function App() {
       html: renderPurchaseOrderHtml(order, supplier, data.company),
       defaultPath: `${sanitizeFileName(order.number)}.pdf`,
     });
-    if (!result.canceled) setNotice("Bon de commande fournisseur exportÃ©");
+    if (!result.canceled) setNotice("Bon de commande fournisseur exporté");
     window.setTimeout(() => setNotice(""), 1800);
   }
 
   async function savePurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog || invoice.status === "posted") {
-      showPermissionNotice("La gestion des achats et du stock est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("La gestion des achats et du stock est réservée aux administrateurs.");
       return false;
     }
     const supplier = data.suppliers.find((entry) => entry.id === invoice.supplierId);
@@ -2270,12 +2273,12 @@ export function App() {
     const purchaseInvoices = exists
       ? data.purchaseInvoices.map((entry) => (entry.id === invoice.id ? normalized : entry))
       : [normalized, ...data.purchaseInvoices];
-    return persist({ ...data, purchaseInvoices }, exists ? "Facture dâ€™achat mise Ã  jour" : "Facture dâ€™achat crÃ©Ã©e");
+    return persist({ ...data, purchaseInvoices }, exists ? "Facture d’achat mise à jour" : "Facture d’achat créée");
   }
 
   async function postPurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("La validation des achats et du stock est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("La validation des achats et du stock est réservée aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
@@ -2284,7 +2287,7 @@ export function App() {
     const normalized = { ...invoice, supplier: supplier?.name || invoice.supplier.trim() };
     const totals = purchaseInvoiceTotals(normalized);
     if (!normalized.supplierId || !normalized.reference.trim() || totals.totalHt <= 0 || !normalized.lines.length) {
-      showPermissionNotice("Renseignez le fournisseur, la rÃ©fÃ©rence et au moins une ligne avec un montant positif.");
+      showPermissionNotice("Renseignez le fournisseur, la référence et au moins une ligne avec un montant positif.");
       return false;
     }
     const duplicate = data.purchaseInvoices.some(
@@ -2294,7 +2297,7 @@ export function App() {
         entry.reference.trim().toLocaleLowerCase("fr") === invoice.reference.trim().toLocaleLowerCase("fr")
     );
     if (duplicate) {
-      showPermissionNotice("Une facture de ce fournisseur porte dÃ©jÃ  cette rÃ©fÃ©rence.");
+      showPermissionNotice("Une facture de ce fournisseur porte déjà cette référence.");
       return false;
     }
     const expense = purchaseInvoiceExpense(normalized);
@@ -2315,18 +2318,18 @@ export function App() {
         expenses: [expense, ...data.expenses.filter((entry) => entry.purchaseInvoiceId !== posted.id)],
         catalog: posted.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, posted, "post"),
       },
-      "Facture validÃ©e : comptes et stock mis Ã  jour"
+      "Facture validée : comptes et stock mis à jour"
     );
   }
 
   async function cancelPurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("Lâ€™annulation dâ€™un achat est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("L’annulation d’un achat est réservée aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
     if (!stored || stored.status !== "posted") return false;
-    if (!confirmDestructiveAction(`Annuler la validation de la facture Â« ${stored.reference} Â» ? Le stock et les comptes seront corrigÃ©s.`))
+    if (!confirmDestructiveAction(`Annuler la validation de la facture « ${stored.reference} » ? Le stock et les comptes seront corrigés.`))
       return false;
     const draft: PurchaseInvoice = {
       ...stored,
@@ -2342,25 +2345,25 @@ export function App() {
         expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
         catalog: stored.purchaseOrderId ? data.catalog : applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel"),
       },
-      "Validation annulÃ©e : comptes et stock corrigÃ©s"
+      "Validation annulée : comptes et stock corrigés"
     );
   }
 
   async function deletePurchaseInvoice(invoice: PurchaseInvoice) {
     if (!canManageCatalog) {
-      showPermissionNotice("La suppression des achats est rÃ©servÃ©e aux administrateurs.");
+      showPermissionNotice("La suppression des achats est réservée aux administrateurs.");
       return false;
     }
     const stored = data.purchaseInvoices.find((entry) => entry.id === invoice.id);
     if (!stored) return false;
     if (stored.sourceOrder) {
       showPermissionNotice(
-        "Cette facture provient dâ€™un bon de commande. Utilisez Â« Revenir au bon de commande Â» pour conserver lâ€™historique."
+        "Cette facture provient d’un bon de commande. Utilisez « Revenir au bon de commande » pour conserver l’historique."
       );
       return false;
     }
-    const impact = stored.status === "posted" ? " Le stock et les comptes seront corrigÃ©s." : "";
-    if (!confirmDestructiveAction(`Supprimer la facture dâ€™achat Â« ${stored.reference || "sans rÃ©fÃ©rence"} Â» ?${impact}`)) return false;
+    const impact = stored.status === "posted" ? " Le stock et les comptes seront corrigés." : "";
+    if (!confirmDestructiveAction(`Supprimer la facture d’achat « ${stored.reference || "sans référence"} » ?${impact}`)) return false;
     await Promise.all(stored.attachments.map(deletePurchaseAttachmentFile));
     return persist(
       {
@@ -2375,7 +2378,7 @@ export function App() {
             ? applyPurchaseInvoiceStockImpact(data.catalog, stored, "cancel")
             : data.catalog,
       },
-      "Facture dâ€™achat supprimÃ©e"
+      "Facture d’achat supprimée"
     );
   }
 
@@ -2385,7 +2388,7 @@ export function App() {
     if (!stored?.sourceOrder) return false;
     if (
       !confirmDestructiveAction(
-        `Revenir au bon de commande ${stored.sourceOrder.number} ? La facture sera retirÃ©e et le stock sera corrigÃ©.`
+        `Revenir au bon de commande ${stored.sourceOrder.number} ? La facture sera retirée et le stock sera corrigé.`
       )
     )
       return false;
@@ -2405,7 +2408,7 @@ export function App() {
         expenses: data.expenses.filter((entry) => entry.purchaseInvoiceId !== stored.id && entry.id !== stored.expenseId),
         catalog: applyPurchaseOrderStockImpact(data.catalog, restored, "cancel"),
       },
-      `Bon de commande ${restored.number} restaurÃ©`
+      `Bon de commande ${restored.number} restauré`
     );
   }
 
@@ -2458,7 +2461,7 @@ export function App() {
       return;
     }
     const logoDataUrl = await readImageAsDataUrl(file);
-    await persist({ ...data, company: { ...data.company, logoDataUrl } }, "Logo mis Ã  jour");
+    await persist({ ...data, company: { ...data.company, logoDataUrl } }, "Logo mis à jour");
   }
 
   async function removeCompanyLogo() {
@@ -2467,10 +2470,14 @@ export function App() {
       return;
     }
     if (!confirmDestructiveAction("Retirer le logo de l'entreprise ?")) return;
-    await persist({ ...data, company: { ...data.company, logoDataUrl: "" } }, "Logo supprimÃ©");
+    await persist({ ...data, company: { ...data.company, logoDataUrl: "" } }, "Logo supprimé");
   }
 
   const activeTheme = getTheme(data.company.themeId);
+  const goToView = (nextView: View) => {
+    setView(nextView);
+    setMobileMenuOpen(false);
+  };
 
   function toggleDashboardWidget(id: DashboardWidgetId) {
     setDashboardWidgets((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
@@ -2519,7 +2526,7 @@ export function App() {
       return (
         <div className="kpi dashboardWidget" key={id}>
           <FileCheck2 />
-          <span>A encaisser</span>
+          <span>À encaisser</span>
           <strong>{currency(pendingValue)}</strong>
         </div>
       );
@@ -2542,7 +2549,7 @@ export function App() {
       return (
         <div className="panel compact dashboardWidget" key={id}>
           <div className="panelTitle">
-            <h2>Echeances</h2>
+            <h2>Échéances</h2>
           </div>
           <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
         </div>
@@ -2552,10 +2559,10 @@ export function App() {
       return (
         <div className="panel wide dashboardWidget" key={id}>
           <div className="panelTitle">
-            <h2>Activite recente</h2>
+            <h2>Activité récente</h2>
             {canEditOperations && (
               <button onClick={() => createDocument("quote")}>
-                <Plus size={17} /> Creer un devis
+                <Plus size={17} /> Créer un devis
               </button>
             )}
           </div>
@@ -2630,7 +2637,7 @@ export function App() {
           </div>
           <div className="dashboardMiniGrid">
             <span><strong>{data.suppliers.length}</strong> fournisseurs</span>
-            <span><strong>{data.catalog.filter((item) => item.supplierId).length}</strong> articles lies</span>
+            <span><strong>{data.catalog.filter((item) => item.supplierId).length}</strong> articles liés</span>
           </div>
         </div>
       );
@@ -2643,7 +2650,7 @@ export function App() {
             <button className="ghost" onClick={() => setView("catalog")}>Ouvrir</button>
           </div>
           <div className="dashboardMiniGrid">
-            <span><strong>{data.catalog.length}</strong> elements</span>
+            <span><strong>{data.catalog.length}</strong> éléments</span>
             <span><strong>{data.catalog.filter((item) => !item.trackStock).length}</strong> non suivis</span>
           </div>
         </div>
@@ -2656,7 +2663,7 @@ export function App() {
           <button className="ghost" onClick={() => setView("accounting")}>Ouvrir</button>
         </div>
         <div className="dashboardMiniGrid">
-          <span><strong>{activeExpenses.length}</strong> depenses</span>
+          <span><strong>{activeExpenses.length}</strong> dépenses</span>
           <span><strong>{currency(accountingExpenseValue)}</strong> TTC</span>
         </div>
       </div>
@@ -2665,7 +2672,7 @@ export function App() {
 
   return (
     <div className="shell" style={themeCssVariables(activeTheme) as CSSProperties}>
-      <aside className="sidebar">
+      <aside className={`sidebar${mobileMenuOpen ? " mobileMenuOpen" : ""}`}>
         <div className="brandMark">
           <div className="logo">{data.company.logoDataUrl ? <img src={data.company.logoDataUrl} alt="" /> : "DV"}</div>
           <div>
@@ -2673,8 +2680,18 @@ export function App() {
             <span>{data.company.name.trim() || "Gestion commerciale"}</span>
           </div>
         </div>
-        <nav>
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
+        <button
+          type="button"
+          className="mobileMenuButton"
+          onClick={() => setMobileMenuOpen((open) => !open)}
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mainNavigation"
+          aria-label={mobileMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+        >
+          {mobileMenuOpen ? <X size={19} /> : <Menu size={19} />}
+        </button>
+        <nav id="mainNavigation">
+          <button className={view === "dashboard" ? "active" : ""} onClick={() => goToView("dashboard")}>
             <Home size={18} /> Tableau
           </button>
           <button
@@ -2682,51 +2699,51 @@ export function App() {
             onClick={() => {
               setSelectedId("");
               setDocumentBackView("documents");
-              setView("documents");
+              goToView("documents");
             }}
           >
             <FileText size={18} /> Documents
           </button>
           <button
             className={view === "clients" || (view === "documentDetail" && documentBackView === "clients") ? "active" : ""}
-            onClick={() => setView("clients")}
+            onClick={() => goToView("clients")}
           >
             <Users size={18} /> Clients
           </button>
-          <button className={view === "purchases" ? "active" : ""} onClick={() => setView("purchases")}>
+          <button className={view === "purchases" ? "active" : ""} onClick={() => goToView("purchases")}>
             <ShoppingCart size={18} /> Achats
           </button>
-          <button className={view === "suppliers" ? "active" : ""} onClick={() => setView("suppliers")}>
+          <button className={view === "suppliers" ? "active" : ""} onClick={() => goToView("suppliers")}>
             <Truck size={18} /> Fournisseurs
           </button>
           {canManageCatalog && (
-            <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>
+            <button className={view === "catalog" ? "active" : ""} onClick={() => goToView("catalog")}>
               <PackageCheck size={18} /> Catalogue
             </button>
           )}
-          <button className={view === "accounting" ? "active" : ""} onClick={() => setView("accounting")}>
+          <button className={view === "accounting" ? "active" : ""} onClick={() => goToView("accounting")}>
             <BookOpenCheck size={18} /> Comptes
           </button>
           {canManageCompany && (
             <button
               className={view === "archives" || (view === "documentDetail" && documentBackView === "archives") ? "active" : ""}
-              onClick={() => setView("archives")}
+              onClick={() => goToView("archives")}
             >
               <Archive size={18} /> Archives
             </button>
           )}
           {canSuperadmin && (
-            <button className={view === "superadmin" ? "active" : ""} onClick={() => setView("superadmin")}>
+            <button className={view === "superadmin" ? "active" : ""} onClick={() => goToView("superadmin")}>
               <ShieldCheck size={18} /> Superadmin
             </button>
           )}
           {canViewCompanySettings && (
-            <button className={view === "company" ? "active" : ""} onClick={() => setView("company")}>
-              <Building2 size={18} /> SociÃ©tÃ©
+            <button className={view === "company" ? "active" : ""} onClick={() => goToView("company")}>
+              <Building2 size={18} /> Société
             </button>
           )}
-          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
-            <Settings size={18} /> ParamÃ¨tres
+          <button className={view === "settings" ? "active" : ""} onClick={() => goToView("settings")}>
+            <Settings size={18} /> Paramètres
           </button>
         </nav>
         <div className="quickActions">
@@ -2736,7 +2753,7 @@ export function App() {
                 setSelectedId("");
                 setDocumentBackView("documents");
                 setTypeFilter("quote");
-                setView("documents");
+                goToView("documents");
               }}
             >
               <FileText size={17} /> Devis
@@ -2746,14 +2763,14 @@ export function App() {
             <button
               onClick={() => {
                 setSelectedClientId("");
-                setView("clients");
+                goToView("clients");
               }}
             >
               <UserPlus size={17} /> Nouveau client
             </button>
           )}
           {canManageCatalog && (
-            <button onClick={() => setView("catalog")}>
+            <button onClick={() => goToView("catalog")}>
               <PackageCheck size={17} /> Catalogue
             </button>
           )}
@@ -2768,7 +2785,7 @@ export function App() {
             {view === "documentDetail" && selectedDoc && <span className="contextLine">{clientDisplayLabel(selectedClient, data.clients)}</span>}
             {view === "documents" && selectedDoc && (
               <span className="contextLine">
-                {selectedDoc.number} Â· {clientDisplayLabel(selectedClient, data.clients)}
+                {selectedDoc.number} · {clientDisplayLabel(selectedClient, data.clients)}
               </span>
             )}
           </div>
@@ -2785,12 +2802,12 @@ export function App() {
             )}
             {workspace && (
               <span className="workspaceBadge">
-                {workspace.organizationName} Â· {roleLabels[workspace.role]}
+                {workspace.organizationName} · {roleLabels[workspace.role]}
               </span>
             )}
             {workspace && (
               <button className="ghost" onClick={signOut}>
-                <LogOut size={17} /> DÃ©connexion
+                <LogOut size={17} /> Déconnexion
               </button>
             )}
           </div>
@@ -2815,7 +2832,7 @@ export function App() {
                       </label>
                       <div>
                         <button type="button" className="iconButton" disabled={!visible || index <= 0} onClick={() => moveDashboardWidget(widget.id, -1)}>
-                          â†‘
+                          ↑
                         </button>
                         <button
                           type="button"
@@ -2823,7 +2840,7 @@ export function App() {
                           disabled={!visible || index < 0 || index >= dashboardWidgets.length - 1}
                           onClick={() => moveDashboardWidget(widget.id, 1)}
                         >
-                          â†“
+                          ↓
                         </button>
                       </div>
                     </div>
@@ -2832,68 +2849,6 @@ export function App() {
               </div>
             </details>
             {dashboardWidgets.map(renderDashboardWidget)}
-          </section>
-        )}
-
-        {false && view === "dashboard" && (
-          <section className="dashboard">
-            <div className="kpi">
-              <FileText />
-              <span>Devis en portefeuille</span>
-              <strong>{currency(dashboardTotals.quotes)}</strong>
-            </div>
-            <div className="kpi">
-              <PackageCheck />
-              <span>Commandes</span>
-              <strong>{currency(dashboardTotals.orders)}</strong>
-            </div>
-            <div className="kpi">
-              <ReceiptText />
-              <span>Factures</span>
-              <strong>{currency(dashboardTotals.invoices)}</strong>
-            </div>
-            <div className="kpi">
-              <FileCheck2 />
-              <span>Ã€ encaisser</span>
-              <strong>{currency(pendingValue)}</strong>
-            </div>
-            <div className="panel compact">
-              <div className="panelTitle">
-                <h2>Suivi des affaires</h2>
-              </div>
-              <div className="statusGrid">
-                <StatusPill status="draft" count={statusCounts.draft} />
-                <StatusPill status="partial" count={statusCounts.partial} />
-                <StatusPill status="paid" count={statusCounts.paid} />
-              </div>
-            </div>
-            <div className="panel compact">
-              <div className="panelTitle">
-                <h2>Ã‰chÃ©ances</h2>
-              </div>
-              <DueRows docs={dueDocuments} clients={data.clients} onOpen={openDocument} />
-            </div>
-            <div className="panel wide">
-              <div className="panelTitle">
-                <div>
-                  <h2>ActivitÃ© rÃ©cente</h2>
-                  {recentDocuments.length > 5 && <span className="panelSubtitle">5 derniers documents affichÃ©s</span>}
-                </div>
-                <div className="panelActions">
-                  {recentDocuments.length > 5 && (
-                    <button className="ghost" onClick={() => setView("documents")}>
-                      Voir tous
-                    </button>
-                  )}
-                  {canEditOperations && (
-                    <button onClick={() => createDocument("quote")}>
-                      <Plus size={17} /> CrÃ©er un devis
-                    </button>
-                  )}
-                </div>
-              </div>
-              <DocumentRows docs={recentDocuments.slice(0, 5)} clients={data.clients} onOpen={openDocument} />
-            </div>
           </section>
         )}
 
@@ -2986,7 +2941,7 @@ export function App() {
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Rechercher document, client, sociÃ©tÃ©, ligne..."
+                  placeholder="Rechercher document, client, société, ligne..."
                 />
               </div>
               <div className="segmented">
@@ -3038,7 +2993,7 @@ export function App() {
                       <div className="documentMonthHeader">
                         <strong>{group.label}</strong>
                         <span>
-                          {group.docs.length} document(s) Â· {currency(group.total)} TTC
+                          {group.docs.length} document(s) · {currency(group.total)} TTC
                         </span>
                       </div>
                       <div className="documentRows">
@@ -3072,11 +3027,11 @@ export function App() {
             {!filteredDocuments.length && (
               <div className="emptyState">
                 <FileText size={42} />
-                <h2>{activeDocuments.length ? "Aucun rÃ©sultat" : "Aucun document"}</h2>
+                <h2>{activeDocuments.length ? "Aucun résultat" : "Aucun document"}</h2>
                 <p>
                   {activeDocuments.length
-                    ? "Aucun devis, bon de commande ou facture ne correspond Ã  cette recherche."
-                    : "CrÃ©ez un premier devis pour dÃ©marrer le flux devis, bon de commande, facture."}
+                    ? "Aucun devis, bon de commande ou facture ne correspond à cette recherche."
+                    : "Créez un premier devis pour démarrer le flux devis, bon de commande, facture."}
                 </p>
                 {canEditOperations && (
                   <button onClick={() => createDocument("quote")}>
@@ -3133,7 +3088,7 @@ export function App() {
               <div className="emptyState">
                 <FileText size={42} />
                 <h2>Document introuvable</h2>
-                <p>Le document sÃ©lectionnÃ© n'existe plus ou n'a pas encore Ã©tÃ© chargÃ©.</p>
+                <p>Le document sélectionné n'existe plus ou n'a pas encore été chargé.</p>
                 <button
                   onClick={() => {
                     setSelectedId("");
@@ -3166,7 +3121,7 @@ export function App() {
                 <input
                   value={clientQuery}
                   onChange={(event) => setClientQuery(event.target.value)}
-                  placeholder="Rechercher par numÃ©ro client, nom, email, tÃ©lÃ©phone, ville..."
+                  placeholder="Rechercher par numéro client, nom, email, téléphone, ville..."
                 />
               </div>
               {canEditOperations && (
@@ -3180,7 +3135,7 @@ export function App() {
                 ["all", "Tous", clientFilterCounts.all],
                 ["professionnel", "Pros", clientFilterCounts.professionnel],
                 ["particulier", "Particuliers", clientFilterCounts.particulier],
-                ["due", "Ã€ encaisser", clientFilterCounts.due],
+                ["due", "À encaisser", clientFilterCounts.due],
                 ["withDocuments", "Avec documents", clientFilterCounts.withDocuments],
               ].map(([value, label, count]) => (
                 <button
@@ -3209,7 +3164,7 @@ export function App() {
                     <span>{draftClient.number}</span>
                     <strong>{draftClient.name || "Nouveau client"}</strong>
                     <em>{draftClient.email || draftClient.phone || "Fiche en cours de saisie"}</em>
-                    <small>Non enregistrÃ©</small>
+                    <small>Non enregistré</small>
                   </button>
                 )}
                 {filteredClients.map((client) => {
@@ -3222,10 +3177,10 @@ export function App() {
                     >
                       <span>{client.number}</span>
                       <strong>{clientDisplayLabel(client, data.clients) || "Client sans nom"}</strong>
-                      <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "CoordonnÃ©es Ã  renseigner"}</em>
+                      <em>{client.email || client.phone || `${client.postalCode} ${client.city}`.trim() || "Coordonnées à renseigner"}</em>
                       <small>
                         {stats.documents} doc.
-                        {stats.due > 0 ? ` Â· ${currency(stats.due)} dÃ»` : ""}
+                        {stats.due > 0 ? ` · ${currency(stats.due)} dû` : ""}
                       </small>
                     </button>
                   );
@@ -3250,10 +3205,10 @@ export function App() {
               ) : (
                 <div className="emptyState clientEmpty">
                   <Users size={42} />
-                  <h2>{data.clients.length ? "Aucun client sÃ©lectionnÃ©" : "Aucun client"}</h2>
+                  <h2>{data.clients.length ? "Aucun client sélectionné" : "Aucun client"}</h2>
                   <p>
                     {data.clients.length
-                      ? "SÃ©lectionnez un client dans la liste pour modifier sa fiche."
+                      ? "Sélectionnez un client dans la liste pour modifier sa fiche."
                       : "Ajoutez votre premier client pour le retrouver ici."}
                   </p>
                   {canEditOperations && (
@@ -3272,7 +3227,7 @@ export function App() {
             {canViewCompanySettings && (
               <>
                 <div className="panelTitle">
-                  <h2>IdentitÃ© et conditions</h2>
+                  <h2>Identité et conditions</h2>
                   <div className="panelActions">
                     <button className="ghost" onClick={copyCompany}>
                       <Clipboard size={17} /> Copier
@@ -3291,7 +3246,7 @@ export function App() {
                   </div>
                   <div>
                     <strong>Logo de l'entreprise</strong>
-                    <span>AffichÃ© dans l'app et sur les PDF gÃ©nÃ©rÃ©s.</span>
+                    <span>Affiché dans l'app et sur les PDF générés.</span>
                   </div>
                   <div className="logoActions">
                     <button type="button" disabled={!canManageCompany} onClick={updateCompanyLogo}>
@@ -3320,7 +3275,7 @@ export function App() {
             <ThemeSettings
               currentThemeId={data.company.themeId}
               readOnly={!canManageCompany}
-              onSave={(themeId) => persist({ ...data, company: { ...data.company, themeId } }, "ThÃ¨me enregistrÃ©")}
+              onSave={(themeId) => persist({ ...data, company: { ...data.company, themeId } }, "Thème enregistré")}
             />
             {workspace && canManageTeam && (
               <TeamSettings
@@ -3384,7 +3339,7 @@ export function App() {
             }}
           >
             <div>
-              <span className="eyebrow">Action dÃ©finitive</span>
+              <span className="eyebrow">Action définitive</span>
               <h2 id="typedConfirmTitle">{typedConfirmation.title}</h2>
               <p>{typedConfirmation.message}</p>
             </div>
@@ -3467,7 +3422,7 @@ function AuthForm({
         <div className="logo">DV</div>
         <div>
           <strong>Devix</strong>
-          <span>AccÃ¨s sÃ©curisÃ©</span>
+          <span>Accès sécurisé</span>
         </div>
       </div>
       <div className="segmented authMode">
@@ -3501,10 +3456,10 @@ function AuthForm({
       {message && <span className="authMessage">{message}</span>}
       <button type="submit" disabled={busy}>
         {busy ? <LoaderCircle className="spinIcon" size={17} /> : <Check size={17} />}
-        {mode === "signin" ? "Se connecter" : "CrÃ©er le compte"}
+        {mode === "signin" ? "Se connecter" : "Créer le compte"}
       </button>
       <button className="ghost passwordLinkButton" type="button" disabled={busy} onClick={onPasswordSetup}>
-        DÃ©finir / rÃ©initialiser le mot de passe
+        Définir / réinitialiser le mot de passe
       </button>
     </form>
   );
@@ -3613,24 +3568,24 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
     ? {
         browser: "Navigateur",
         development: "Electron dev",
-        installed: "InstallÃ©",
+        installed: "Installé",
         portable: "Portable",
       }[diagnostics.mode]
     : "Chargement";
-  const sessionLabel = workspace ? `${workspace.organizationName} Â· ${roleLabels[workspace.role]}` : "Mode local";
+  const sessionLabel = workspace ? `${workspace.organizationName} · ${roleLabels[workspace.role]}` : "Mode local";
   const lastLocalBackup = diagnostics?.lastLocalBackupAt ? formatShortDate(diagnostics.lastLocalBackupAt) : "Jamais";
   const oneDriveBackupLabel = diagnostics?.oneDriveBackupRoot
     ? diagnostics.lastOneDriveBackupAt
       ? formatShortDate(diagnostics.lastOneDriveBackupAt)
       : "Jamais"
-    : "Non configurÃ©";
+    : "Non configuré";
   const pathRows = diagnostics
     ? [
-        { key: "userData", label: "Dossier donnÃ©es", value: diagnostics.userDataPath, canOpen: diagnostics.mode !== "browser" },
+        { key: "userData", label: "Dossier données", value: diagnostics.userDataPath, canOpen: diagnostics.mode !== "browser" },
         { key: "dataPath", label: "Fichier local", value: diagnostics.dataPath, canOpen: false },
         { key: "backupRoot", label: "Sauvegardes locales", value: diagnostics.backupRoot, canOpen: diagnostics.mode !== "browser" },
-        { key: "attachmentsRoot", label: "PiÃ¨ces jointes", value: diagnostics.attachmentsRoot, canOpen: diagnostics.mode !== "browser" },
-        { key: "oneDriveBackupRoot", label: "Sauvegardes OneDrive", value: diagnostics.oneDriveBackupRoot || "Non configurÃ©", canOpen: Boolean(diagnostics.oneDriveBackupRoot) },
+        { key: "attachmentsRoot", label: "Pièces jointes", value: diagnostics.attachmentsRoot, canOpen: diagnostics.mode !== "browser" },
+        { key: "oneDriveBackupRoot", label: "Sauvegardes OneDrive", value: diagnostics.oneDriveBackupRoot || "Non configuré", canOpen: Boolean(diagnostics.oneDriveBackupRoot) },
       ]
     : [];
 
@@ -3641,7 +3596,7 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
           <Settings size={20} />
         </div>
         <div>
-          <span className="eyebrow">Ã€ propos</span>
+          <span className="eyebrow">À propos</span>
           <h2>Version et diagnostic</h2>
         </div>
       </div>
@@ -3660,19 +3615,19 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
           <strong>{sessionLabel}</strong>
         </div>
         <div>
-          <span>DonnÃ©es</span>
+          <span>Données</span>
           <strong>
-            {data.clients.length} clients Â· {data.documents.length} docs
+            {data.clients.length} clients · {data.documents.length} docs
           </strong>
         </div>
         <div>
           <span>Achats</span>
           <strong>
-            {data.suppliers.length} fournisseurs Â· {data.purchaseOrders.length + data.purchaseInvoices.length} piÃ¨ces
+            {data.suppliers.length} fournisseurs · {data.purchaseOrders.length + data.purchaseInvoices.length} pièces
           </strong>
         </div>
         <div>
-          <span>DerniÃ¨re sauvegarde locale</span>
+          <span>Dernière sauvegarde locale</span>
           <strong>{lastLocalBackup}</strong>
         </div>
         <div>
@@ -3693,7 +3648,7 @@ function DiagnosticsSettings({ data, workspace }: { data: AppData; workspace: Wo
               <strong>{row.value}</strong>
             </div>
             <button className="ghost subtleButton" type="button" disabled={!row.value} onClick={() => void copyValue(row.key, row.value)}>
-              <Clipboard size={15} /> {copiedKey === row.key ? "CopiÃ©" : "Copier"}
+              <Clipboard size={15} /> {copiedKey === row.key ? "Copié" : "Copier"}
             </button>
             {row.canOpen && (
               <button className="ghost subtleButton" type="button" disabled={busyPath === row.value} onClick={() => void openPath(row.value)}>
@@ -3746,11 +3701,11 @@ function ThemeSettings({
         </div>
         <div>
           <span className="eyebrow">Apparence</span>
-          <h2>ThÃ¨me</h2>
-          <p>La palette choisie sâ€™applique Ã  Devix et Ã  tous les PDF gÃ©nÃ©rÃ©s.</p>
+          <h2>Thème</h2>
+          <p>La palette choisie s’applique à Devix et à tous les PDF générés.</p>
         </div>
       </div>
-      <div className="themeGrid" role="radiogroup" aria-label="ThÃ¨me de couleur">
+      <div className="themeGrid" role="radiogroup" aria-label="Thème de couleur">
         {devixThemes.map((theme) => {
           const selected = selectedThemeId === theme.id;
           return (
@@ -3781,16 +3736,16 @@ function ThemeSettings({
         })}
       </div>
       <div className="themeActions">
-        {readOnly && <span className="preferenceHint">Seuls les administrateurs peuvent modifier le thÃ¨me de lâ€™entreprise.</span>}
+        {readOnly && <span className="preferenceHint">Seuls les administrateurs peuvent modifier le thème de l’entreprise.</span>}
         {saved && (
           <span className="inlineSaveConfirmation">
-            <Check size={16} /> ThÃ¨me enregistrÃ©
+            <Check size={16} /> Thème enregistré
           </span>
         )}
         {!readOnly && (
           <button type="button" disabled={saving || selectedThemeId === currentThemeId} onClick={() => void applyTheme()}>
             {saving ? <LoaderCircle className="spinIcon" size={17} /> : <Palette size={17} />}
-            {saving ? "Applicationâ€¦" : "Appliquer le thÃ¨me"}
+            {saving ? "Application…" : "Appliquer le thème"}
           </button>
         )}
       </div>
@@ -3825,7 +3780,7 @@ function AccountPasswordSettings({
       <div className="panelTitle accountTitle">
         <div>
           <span className="eyebrow">Compte</span>
-          <h3>AccÃ¨s personnel</h3>
+          <h3>Accès personnel</h3>
         </div>
         <div className="accountActions">
           <span className="accountEmail">{email}</span>
@@ -3843,7 +3798,7 @@ function AccountPasswordSettings({
               autoComplete="new-password"
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="8 caractÃ¨res minimum"
+              placeholder="8 caractères minimum"
             />
           </label>
           <label>
@@ -3853,7 +3808,7 @@ function AccountPasswordSettings({
               autoComplete="new-password"
               value={confirmPassword}
               onChange={(event) => onConfirmPasswordChange(event.target.value)}
-              placeholder="RÃ©pÃ©ter le mot de passe"
+              placeholder="Répéter le mot de passe"
             />
           </label>
           <button type="submit" disabled={busy || !password || !confirmPassword}>
@@ -3865,7 +3820,7 @@ function AccountPasswordSettings({
       <div className="accountDangerZone">
         <div>
           <strong>Supprimer le compte</strong>
-          <span>Suppression dÃ©finitive de votre accÃ¨s et de vos entreprises propriÃ©taires.</span>
+          <span>Suppression définitive de votre accès et de vos entreprises propriétaires.</span>
         </div>
         {deleteConfirmOpen ? (
           <div className="accountDeleteConfirm">
@@ -3921,8 +3876,8 @@ function TeamSettings({
     <section className="teamSection">
       <div className="panelTitle teamTitle">
         <div>
-          <span className="eyebrow">Ã‰quipe</span>
-          <h3>EmployÃ©s et accÃ¨s</h3>
+          <span className="eyebrow">Équipe</span>
+          <h3>Employés et accès</h3>
         </div>
         <button className="ghost subtleButton" disabled={busy} onClick={onRefresh} type="button">
           {busy ? <LoaderCircle className="spinIcon" size={15} /> : <Users size={15} />}
@@ -3933,7 +3888,7 @@ function TeamSettings({
       {canManage && (
         <form className="inviteForm" onSubmit={onSubmitInvitation}>
           <label>
-            Email employÃ©
+            Email employé
             <input
               type="email"
               value={inviteEmail}
@@ -3992,7 +3947,7 @@ function TeamSettings({
                       className="iconButton dangerIcon"
                       disabled={locked || busy}
                       onClick={() => onDeleteMember(member)}
-                      title="Retirer l'employÃ©"
+                      title="Retirer l'employé"
                       type="button"
                     >
                       <Trash2 size={17} />
@@ -4001,7 +3956,7 @@ function TeamSettings({
                 </div>
               );
             })}
-            {!members.length && <div className="emptyRows compactEmpty">Aucun membre chargÃ©.</div>}
+            {!members.length && <div className="emptyRows compactEmpty">Aucun membre chargé.</div>}
           </div>
         </div>
 
@@ -4017,10 +3972,10 @@ function TeamSettings({
                   <div>
                     <strong>{invitation.email}</strong>
                     <span>
-                      {roleLabels[invitation.role]} Â· expire le {formatShortDate(invitation.expiresAt)}
+                      {roleLabels[invitation.role]} · expire le {formatShortDate(invitation.expiresAt)}
                     </span>
                   </div>
-                  <span className="statusBadge info">Email envoyÃ©</span>
+                  <span className="statusBadge info">Email envoyé</span>
                   <button
                     className="iconButton dangerIcon"
                     disabled={busy}
@@ -4039,7 +3994,7 @@ function TeamSettings({
       </div>
 
       <span className="teamFootnote">
-        {workspace.organizationName} Â· {roleLabels[workspace.role]}
+        {workspace.organizationName} · {roleLabels[workspace.role]}
       </span>
     </section>
   );
@@ -4066,7 +4021,7 @@ function DocumentRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; cli
 }
 
 function DueRows({ docs, clients, onOpen }: { docs: BusinessDocument[]; clients: Client[]; onOpen: (id: string) => void }) {
-  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune Ã©chÃ©ance ouverte.</div>;
+  if (!docs.length) return <div className="emptyRows compactEmpty">Aucune échéance ouverte.</div>;
   return (
     <div className="dueRows">
       {docs.map((doc) => (
@@ -4134,8 +4089,8 @@ function ArchivesView({
       <section className="panel archiveActionPanel">
         <div className="panelTitle">
           <div>
-            <span className="eyebrow">ClÃ´ture annuelle</span>
-            <h2>Archiver une annÃ©e terminÃ©e</h2>
+            <span className="eyebrow">Clôture annuelle</span>
+            <h2>Archiver une année terminée</h2>
           </div>
           <div className="panelActions">
             <select
@@ -4153,12 +4108,12 @@ function ArchivesView({
               disabled={!canArchive || selectedArchiveCandidate === undefined || activeForSelection === 0}
               onClick={() => selectedArchiveCandidate !== undefined && void onArchiveYear(selectedArchiveCandidate)}
             >
-              <Archive size={17} /> {selectedArchiveCandidate === undefined ? "Aucune annÃ©e Ã  archiver" : `Archiver ${selectedArchiveCandidate}`}
+              <Archive size={17} /> {selectedArchiveCandidate === undefined ? "Aucune année à archiver" : `Archiver ${selectedArchiveCandidate}`}
             </button>
           </div>
         </div>
         <p>
-          {activeForSelection} Ã©lÃ©ment(s) actif(s) seront retirÃ©s des vues courantes. Ils resteront consultables ici, documents et livre de
+          {activeForSelection} élément(s) actif(s) seront retirés des vues courantes. Ils resteront consultables ici, documents et livre de
           comptes compris.
         </p>
       </section>
@@ -4166,7 +4121,7 @@ function ArchivesView({
       <section className="archiveLayout">
         <aside className="panel archiveYearList">
           <div className="panelTitle">
-            <h2>AnnÃ©es archivÃ©es</h2>
+            <h2>Années archivées</h2>
           </div>
           {years.length ? (
             years.map((year) => (
@@ -4176,7 +4131,7 @@ function ArchivesView({
               </button>
             ))
           ) : (
-            <div className="emptyRows compactEmpty">Aucune annÃ©e archivÃ©e.</div>
+            <div className="emptyRows compactEmpty">Aucune année archivée.</div>
           )}
         </aside>
 
@@ -4203,7 +4158,7 @@ function ArchivesView({
                   <strong>{currency(archiveReport.operatingExpensesHt)}</strong>
                 </div>
                 <div>
-                  <span>RÃ©sultat</span>
+                  <span>Résultat</span>
                   <strong>{currency(archiveReport.netProfit)}</strong>
                 </div>
               </div>
@@ -4224,14 +4179,14 @@ function ArchivesView({
                     </button>
                   );
                 })}
-                {!previewData.documents.length && <div className="emptyRows">Aucun document commercial archivÃ© pour cette annÃ©e.</div>}
+                {!previewData.documents.length && <div className="emptyRows">Aucun document commercial archivé pour cette année.</div>}
               </div>
             </>
           ) : (
             <div className="emptyState">
               <Archive size={42} />
-              <h2>SÃ©lectionnez une annÃ©e</h2>
-              <p>Les documents archivÃ©s et la synthÃ¨se comptable de lâ€™annÃ©e apparaÃ®tront ici.</p>
+              <h2>Sélectionnez une année</h2>
+              <p>Les documents archivés et la synthèse comptable de l’année apparaîtront ici.</p>
             </div>
           )}
         </section>
@@ -4303,7 +4258,7 @@ function SuperadminView({
               </div>
               <div className="panelActions">
                 <span className="workspaceBadge">
-                  Mis Ã  jour {selectedWorkspace.updatedAt ? formatShortDate(selectedWorkspace.updatedAt) : "inconnu"}
+                  Mis à jour {selectedWorkspace.updatedAt ? formatShortDate(selectedWorkspace.updatedAt) : "inconnu"}
                 </span>
                 <button className="danger" disabled={busy} onClick={() => void onDelete(selectedWorkspace)}>
                   <Trash2 size={17} /> Supprimer
@@ -4356,7 +4311,7 @@ function SuperadminView({
                         <th>Mois</th>
                         <th>CA HT</th>
                         <th>Charges</th>
-                        <th>RÃ©sultat</th>
+                        <th>Résultat</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4371,7 +4326,7 @@ function SuperadminView({
                       {!report.months.length && (
                         <tr>
                           <td colSpan={4} className="accountingEmpty">
-                            Aucune Ã©criture sur lâ€™annÃ©e.
+                            Aucune écriture sur l’année.
                           </td>
                         </tr>
                       )}
@@ -4384,8 +4339,8 @@ function SuperadminView({
         ) : (
           <div className="emptyState">
             <ShieldCheck size={42} />
-            <h2>SÃ©lectionnez un compte</h2>
-            <p>Les documents, bons de commande, factures et comptes sâ€™afficheront ici.</p>
+            <h2>Sélectionnez un compte</h2>
+            <p>Les documents, bons de commande, factures et comptes s’afficheront ici.</p>
           </div>
         )}
       </section>
@@ -4489,7 +4444,7 @@ function DocumentEditor({
   const patchLine = (id: string, partial: Partial<LineItem>) =>
     patch({ lines: doc.lines.map((line) => (line.id === id ? { ...line, ...partial } : line)) });
   const removeLine = (line: LineItem) => {
-    if (!confirmDestructiveAction(`Supprimer la ligne Â« ${line.description || "sans dÃ©signation"} Â» ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer la ligne « ${line.description || "sans désignation"} » ?`)) return;
     patch({ lines: doc.lines.filter((item) => item.id !== line.id) });
   };
   const savedDepositAmount = Number(doc.depositPaidAmount) || 0;
@@ -4528,12 +4483,12 @@ function DocumentEditor({
   const removePayment = (paymentId: string) => {
     if (!canEditPayments) return;
     const payment = (doc.payments || []).find((entry) => entry.id === paymentId);
-    if (!confirmDestructiveAction(`Supprimer le rÃ¨glement${payment ? ` de ${currency(payment.amount)}` : ""} ?`)) return;
+    if (!confirmDestructiveAction(`Supprimer le règlement${payment ? ` de ${currency(payment.amount)}` : ""} ?`)) return;
     patchPayment({ payments: (doc.payments || []).filter((payment) => payment.id !== paymentId) });
   };
   const addReminder = async () => {
     if (!canEditPayments || reminderSending) return;
-    setReminderMessage(reminderDraft.channel === "email" ? "PrÃ©paration du PDF de relance..." : "Enregistrement de la relance...");
+    setReminderMessage(reminderDraft.channel === "email" ? "Préparation du PDF de relance..." : "Enregistrement de la relance...");
     setReminderSending(true);
     await new Promise((resolve) => window.setTimeout(resolve, 80));
     const reminder: PaymentReminder = {
@@ -4549,7 +4504,7 @@ function DocumentEditor({
         if (result.success) setReminderDraft({ sentAt: todayIso(), channel: reminderDraft.channel, note: "" });
       } catch (error) {
         console.error("Relance impossible", error);
-        setReminderMessage("Relance impossible. VÃ©rifiez le client mail ou l'adresse du client.");
+        setReminderMessage("Relance impossible. Vérifiez le client mail ou l'adresse du client.");
       } finally {
         setReminderSending(false);
         window.setTimeout(() => setReminderMessage(""), 5200);
@@ -4559,7 +4514,7 @@ function DocumentEditor({
     patchPayment({ reminders: [reminder, ...(doc.reminders || [])] });
     setReminderDraft({ sentAt: todayIso(), channel: reminderDraft.channel, note: "" });
     setReminderSending(false);
-    setReminderMessage("Relance enregistrÃ©e.");
+    setReminderMessage("Relance enregistrée.");
     window.setTimeout(() => setReminderMessage(""), 2600);
   };
   const removeReminder = (reminderId: string) => {
@@ -4590,16 +4545,16 @@ function DocumentEditor({
     <article className="editor">
       <div className="editorHeader editorActionBar">
         <div className="documentState">
-          <span className="eyebrow">Ã‰tat du document</span>
+          <span className="eyebrow">État du document</span>
           <StatusBadge status={doc.status} />
           <span className={`documentSaveStatus ${saveState}`}>
             {saveState === "dirty"
-              ? "Modifications non enregistrÃ©es"
+              ? "Modifications non enregistrées"
               : saveState === "saving"
-                ? "Enregistrementâ€¦"
+                ? "Enregistrement…"
                 : saveState === "error"
                   ? "Sauvegarde impossible"
-                  : "EnregistrÃ©"}
+                  : "Enregistré"}
           </span>
         </div>
         <div className="editorActions">
@@ -4611,7 +4566,7 @@ function DocumentEditor({
                 onClick={() => onSave(doc)}
               >
                 {saveState === "saving" ? <LoaderCircle className="spinIcon" size={17} /> : <Save size={17} />}
-                {saveState === "saving" ? "Enregistrementâ€¦" : "Enregistrer"}
+                {saveState === "saving" ? "Enregistrement…" : "Enregistrer"}
               </button>
             )}
             {!readOnly && doc.type === "quote" && (
@@ -4646,7 +4601,7 @@ function DocumentEditor({
             </button>
             <button className="ghost" disabled={emailing} onClick={sendEmail}>
               {emailing ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
-              {emailing ? "PrÃ©paration..." : "Email"}
+              {emailing ? "Préparation..." : "Email"}
             </button>
           </div>
           <div className="editorActionGroup secondaryActions">
@@ -4687,7 +4642,7 @@ function DocumentEditor({
             <div>
               <span className="sectionStep">1</span>
               <div>
-                <h3>Informations gÃ©nÃ©rales</h3>
+                <h3>Informations générales</h3>
                 <p>Client, objet et calendrier du document</p>
               </div>
             </div>
@@ -4713,11 +4668,11 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Date dâ€™Ã©mission
+              Date d’émission
               <input disabled={readOnly} type="date" value={doc.issueDate} onChange={(event) => patch({ issueDate: event.target.value })} />
             </label>
             <label>
-              Ã‰chÃ©ance
+              Échéance
               <input disabled={readOnly} type="date" value={doc.dueDate} onChange={(event) => patch({ dueDate: event.target.value })} />
             </label>
           </div>
@@ -4729,7 +4684,7 @@ function DocumentEditor({
               <span className="sectionStep">2</span>
               <div>
                 <h3>Chantier et conditions</h3>
-                <p>Lieu, planning et acompte demandÃ©</p>
+                <p>Lieu, planning et acompte demandé</p>
               </div>
             </div>
           </div>
@@ -4738,13 +4693,13 @@ function DocumentEditor({
               Adresse du chantier
               <input
                 disabled={readOnly}
-                placeholder="Si diffÃ©rente de lâ€™adresse client"
+                placeholder="Si différente de l’adresse client"
                 value={doc.siteAddress}
                 onChange={(event) => patch({ siteAddress: event.target.value })}
               />
             </label>
             <label>
-              DÃ©marrage prÃ©vu
+              Démarrage prévu
               <input
                 disabled={readOnly}
                 placeholder="Ex. : semaine 42"
@@ -4753,7 +4708,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              DurÃ©e estimÃ©e
+              Durée estimée
               <input
                 disabled={readOnly}
                 placeholder="Ex. : 3 jours"
@@ -4762,7 +4717,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Acompte demandÃ©
+              Acompte demandé
               <span className="suffixInput formSuffix">
                 <input
                   disabled={readOnly}
@@ -4784,7 +4739,7 @@ function DocumentEditor({
             <span className="sectionStep">3</span>
             <div>
               <h3>Articles et prestations</h3>
-              <p>{doc.lines.length ? `${doc.lines.length} ligne(s) dans le document` : "Ajoutez les Ã©lÃ©ments Ã  facturer"}</p>
+              <p>{doc.lines.length ? `${doc.lines.length} ligne(s) dans le document` : "Ajoutez les éléments à facturer"}</p>
             </div>
           </div>
         </div>
@@ -4802,7 +4757,7 @@ function DocumentEditor({
               </option>
               {catalog.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.category || "Sans catÃ©gorie"} - {item.name || "Ã‰lÃ©ment sans nom"} ({currency(item.price)}/{item.unit || "u"})
+                  {item.category || "Sans catégorie"} - {item.name || "Élément sans nom"} ({currency(item.price)}/{item.unit || "u"})
                 </option>
               ))}
             </select>
@@ -4815,9 +4770,9 @@ function DocumentEditor({
         {doc.lines.length ? (
           <div className="lineTable">
             <div className="lineHead">
-              <span>DÃ©signation</span>
-              <span>UnitÃ©</span>
-              <span>QtÃ©</span>
+              <span>Désignation</span>
+              <span>Unité</span>
+              <span>Qté</span>
               <span>PU HT</span>
               <span>Remise</span>
               <span>TVA</span>
@@ -4846,7 +4801,7 @@ function DocumentEditor({
                       disabled={readOnly}
                       value={line.details}
                       onChange={(event) => patchLine(line.id, { details: event.target.value })}
-                      placeholder="DÃ©tails : essence, finition, quincaillerie, pose..."
+                      placeholder="Détails : essence, finition, quincaillerie, pose..."
                     />
                     {!readOnly && (
                       <div className="marginHelperShell">
@@ -4873,11 +4828,11 @@ function DocumentEditor({
                             </label>
                             <div>
                               {!line.purchasePrice ? (
-                                <span>Main d'oeuvre : marge 100%</span>
+                                <span>Main d’œuvre : marge 100%</span>
                               ) : targetDiscount === null || !marginTargets[line.id] ? (
                                 <span>Renseignez une marge cible</span>
                               ) : canApplyTargetDiscount ? (
-                                <span>Remise conseillÃ©e : {targetDiscount.toFixed(1)}%</span>
+                                <span>Remise conseillée : {targetDiscount.toFixed(1)}%</span>
                               ) : (
                                 <span>Objectif impossible avec ce prix d'achat</span>
                               )}
@@ -4967,7 +4922,7 @@ function DocumentEditor({
             <span className="sectionStep">4</span>
             <div>
               <h3>Conditions et totaux</h3>
-              <p>Informations finales qui apparaÃ®tront sur le document</p>
+              <p>Informations finales qui apparaîtront sur le document</p>
             </div>
           </div>
         </div>
@@ -4976,7 +4931,7 @@ function DocumentEditor({
             Note document
             <textarea
               disabled={readOnly}
-              placeholder="Informations affichÃ©es sur ce document"
+              placeholder="Informations affichées sur ce document"
               value={doc.notes}
               onChange={(event) => patch({ notes: event.target.value })}
             />
@@ -4985,7 +4940,7 @@ function DocumentEditor({
             Conditions
             <textarea
               disabled={readOnly}
-              placeholder="Conditions propres Ã  ce document"
+              placeholder="Conditions propres à ce document"
               value={doc.terms}
               onChange={(event) => patch({ terms: event.target.value })}
             />
@@ -5017,21 +4972,21 @@ function DocumentEditor({
         <section className="paymentPanel" aria-label="Paiements">
           <div className="paymentSummary">
             <div>
-              <span>Acompte encaissÃ©</span>
+              <span>Acompte encaissé</span>
               <strong>{currency(paySummary.depositPaidAmount)}</strong>
             </div>
             <div>
-              <span>RÃ¨glements</span>
+              <span>Règlements</span>
               <strong>{currency(paySummary.paymentAmount)}</strong>
             </div>
             <div>
-              <span>Reste dÃ»</span>
+              <span>Reste dû</span>
               <strong>{currency(paySummary.remainingAmount)}</strong>
             </div>
           </div>
           <div className="paymentGrid">
             <label>
-              Acompte encaissÃ©
+              Acompte encaissé
               <input
                 disabled={!canEditPayments}
                 type="number"
@@ -5057,11 +5012,11 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Reste dÃ»
+              Reste dû
               <input disabled type="number" min="0" step="0.01" value={paySummary.remainingAmount.toFixed(2)} readOnly />
             </label>
             <label>
-              RÃ¨glement Ã  ajouter
+              Règlement à ajouter
               <input
                 disabled={!canEditPayments}
                 type="number"
@@ -5073,7 +5028,7 @@ function DocumentEditor({
               />
             </label>
             <label>
-              Date rÃ¨glement
+              Date règlement
               <input
                 disabled={!canEditPayments}
                 type="date"
@@ -5096,16 +5051,16 @@ function DocumentEditor({
               </select>
             </label>
             <label>
-              Note rÃ¨glement
+              Note règlement
               <input
                 disabled={!canEditPayments}
                 value={paymentDraft.note}
                 onChange={(event) => setPaymentDraft((draft) => ({ ...draft, note: event.target.value }))}
-                placeholder="RÃ©fÃ©rence, banque..."
+                placeholder="Référence, banque..."
               />
             </label>
             <button type="button" disabled={!canAddPayment} onClick={addPayment}>
-              <Check size={17} /> Ajouter rÃ¨glement
+              <Check size={17} /> Ajouter règlement
             </button>
           </div>
           <label className="fullLabel">
@@ -5114,7 +5069,7 @@ function DocumentEditor({
               disabled={!canEditPayments}
               value={doc.paymentNotes || ""}
               onChange={(event) => patchPayment({ paymentNotes: event.target.value })}
-              placeholder="Informations internes de rÃ¨glement"
+              placeholder="Informations internes de règlement"
             />
           </label>
           {!!doc.payments?.length && (
@@ -5158,7 +5113,7 @@ function DocumentEditor({
                   }
                 >
                   <option value="email">Email</option>
-                  <option value="phone">TÃ©lÃ©phone</option>
+                  <option value="phone">Téléphone</option>
                   <option value="letter">Courrier</option>
                   <option value="other">Autre</option>
                 </select>
@@ -5169,12 +5124,12 @@ function DocumentEditor({
                   disabled={!canEditPayments || reminderSending}
                   value={reminderDraft.note}
                   onChange={(event) => setReminderDraft((draft) => ({ ...draft, note: event.target.value }))}
-                  placeholder="Relance envoyÃ©e, rÃ©ponse client..."
+                  placeholder="Relance envoyée, réponse client..."
                 />
               </label>
               <button type="button" disabled={!canEditPayments || reminderSending} onClick={addReminder}>
                 {reminderSending ? <LoaderCircle className="spinIcon" size={17} /> : <Mail size={17} />}
-                {reminderSending ? "PrÃ©paration PDF..." : "Ajouter relance"}
+                {reminderSending ? "Préparation PDF..." : "Ajouter relance"}
               </button>
             </div>
             {reminderMessage && <div className={reminderSending ? "reminderFeedback pending" : "reminderFeedback"}>{reminderMessage}</div>}
@@ -5201,17 +5156,17 @@ function DocumentEditor({
         </section>
       )}
 
-      <section className="attachmentsPanel" aria-label="PiÃ¨ces jointes">
+      <section className="attachmentsPanel" aria-label="Pièces jointes">
         <div className="attachmentsSummary">
           <div className="attachmentsTitle">
             <Paperclip size={15} />
             <div>
-              <h3>Documents associÃ©s</h3>
-              <span>{doc.attachments.length ? `${doc.attachments.length} piÃ¨ce(s) jointe(s)` : "Aucune piÃ¨ce jointe"}</span>
+              <h3>Documents associés</h3>
+              <span>{doc.attachments.length ? `${doc.attachments.length} pièce(s) jointe(s)` : "Aucune pièce jointe"}</span>
             </div>
           </div>
           {!readOnly && (
-            <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une piÃ¨ce jointe">
+            <button className="ghost attachmentAddButton" onClick={() => onAddAttachment(doc)} title="Ajouter une pièce jointe">
               <Paperclip size={16} /> Ajouter
             </button>
           )}
@@ -5223,17 +5178,17 @@ function DocumentEditor({
                 <div>
                   <strong>{attachment.name}</strong>
                   <span>
-                    {fileSizeLabel(attachment.size)} - ajoutÃ© le {formatShortDate(attachment.addedAt)}
+                    {fileSizeLabel(attachment.size)} - ajouté le {formatShortDate(attachment.addedAt)}
                   </span>
                 </div>
-                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la piÃ¨ce jointe">
+                <button className="iconButton" onClick={() => onOpenAttachment(attachment)} title="Ouvrir la pièce jointe">
                   <ExternalLink size={16} />
                 </button>
                 {!readOnly && (
                   <button
                     className="iconButton dangerIcon"
                     onClick={() => onRemoveAttachment(doc, attachment)}
-                    title="Supprimer la piÃ¨ce jointe"
+                    title="Supprimer la pièce jointe"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -5245,7 +5200,7 @@ function DocumentEditor({
       </section>
       <section className="previewDisclosure">
         <button className="ghost previewToggle" type="button" onClick={() => setPreviewOpen((open) => !open)}>
-          <Eye size={17} /> {previewOpen ? "Masquer lâ€™aperÃ§u" : "Afficher lâ€™aperÃ§u"}
+          <Eye size={17} /> {previewOpen ? "Masquer l’aperçu" : "Afficher l’aperçu"}
         </button>
         {previewOpen && <DocumentPreview doc={doc} client={client} sums={sums} />}
       </section>
@@ -5263,7 +5218,7 @@ function HistoryPanel({ doc }: { doc: BusinessDocument }) {
             {labels[entry.fromType]} {entry.fromNumber} {"->"} {labels[entry.toType]} {entry.toNumber}
           </strong>
           <em>
-            {entry.snapshot.projectName || "Sans nom"} Â· {currency(totals(entry.snapshot.lines).totalTtc)}
+            {entry.snapshot.projectName || "Sans nom"} · {currency(totals(entry.snapshot.lines).totalTtc)}
           </em>
         </article>
       ))}
@@ -5285,7 +5240,7 @@ function DocumentPreview({ doc, client, sums }: { doc: BusinessDocument; client?
         <strong>{clientLabel(client)}</strong>
         <span>{doc.projectName || "Document sans nom"}</span>
         <span>
-          {doc.issueDate} Â· {doc.dueDate}
+          {doc.issueDate} · {doc.dueDate}
         </span>
       </div>
       <div className="previewLines">
@@ -5382,7 +5337,7 @@ function CatalogManager({
       quantity: type === "adjustment" ? Math.abs(nextQuantity - previousQuantity) : quantity,
       previousQuantity,
       nextQuantity,
-      reason: draft.reason.trim() || (type === "entry" ? "EntrÃ©e de stock" : type === "exit" ? "Sortie de stock" : "Correction inventaire"),
+      reason: draft.reason.trim() || (type === "entry" ? "Entrée de stock" : type === "exit" ? "Sortie de stock" : "Correction inventaire"),
       createdAt: new Date().toISOString(),
     };
     onChange({
@@ -5407,7 +5362,7 @@ function CatalogManager({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rechercher un article, une prestation, une catÃ©gorie..."
+            placeholder="Rechercher un article, une prestation, une catégorie..."
           />
         </div>
         <select
@@ -5422,12 +5377,12 @@ function CatalogManager({
           <option value="untracked">Sans suivi de stock</option>
         </select>
         <button onClick={onCreate}>
-          <Plus size={17} /> Nouvel Ã©lÃ©ment
+          <Plus size={17} /> Nouvel élément
         </button>
       </div>
       <div className="stockSummary">
         <div>
-          <span>Ã‰lÃ©ments</span>
+          <span>Éléments</span>
           <strong>{items.length}</strong>
         </div>
         <div>
@@ -5452,14 +5407,14 @@ function CatalogManager({
             <div className="catalogMain">
               <div className="catalogRowHeader">
                 <div>
-                  <strong>{item.name || "Ã‰lÃ©ment sans nom"}</strong>
-                  <span>{item.category || "Sans catÃ©gorie"}</span>
+                  <strong>{item.name || "Élément sans nom"}</strong>
+                  <span>{item.category || "Sans catégorie"}</span>
                 </div>
                 <span className={`statusBadge ${stockTone(draft)}`}>{stockLabel(draft)}</span>
                 <button
                   className="iconButton"
-                  title="Enregistrer cet Ã©lÃ©ment"
-                  aria-label="Enregistrer cet Ã©lÃ©ment"
+                  title="Enregistrer cet élément"
+                  aria-label="Enregistrer cet élément"
                   disabled={!isItemDirty(item)}
                   onClick={() => saveItemDraft(item)}
                 >
@@ -5467,8 +5422,8 @@ function CatalogManager({
                 </button>
                 <button
                   className="iconButton dangerIcon"
-                  title="Supprimer cet Ã©lÃ©ment"
-                  aria-label="Supprimer cet Ã©lÃ©ment"
+                  title="Supprimer cet élément"
+                  aria-label="Supprimer cet élément"
                   onClick={() => onDelete(item)}
                 >
                   <Trash2 size={16} />
@@ -5484,7 +5439,7 @@ function CatalogManager({
                   />
                 </label>
                 <label>
-                  CatÃ©gorie
+                  Catégorie
                   <input
                     placeholder="Ex. : pose, fabrication"
                     value={draft.category}
@@ -5492,7 +5447,7 @@ function CatalogManager({
                   />
                 </label>
                 <label>
-                  UnitÃ©
+                  Unité
                   <input
                     placeholder="u, h, ml, m2"
                     value={draft.unit}
@@ -5512,7 +5467,7 @@ function CatalogManager({
                   Prix d'achat
                   <input
                     type="number"
-                    placeholder="0 = main d'oeuvre"
+                    placeholder="0 = main d’œuvre"
                     value={draft.purchasePrice || ""}
                     onChange={(event) => patch(item, { purchasePrice: Number(event.target.value) })}
                   />
@@ -5531,9 +5486,9 @@ function CatalogManager({
                 </label>
               </div>
               <div className="catalogSuggestion">
-                <span>Prix vente conseillÃ© HT</span>
-                <strong>{suggestedPrice > 0 ? currency(suggestedPrice) : "Non calculÃ©"}</strong>
-                <small>Marge nette min. 30% aprÃ¨s {company.corporateTaxRate || 0}% d'imposition</small>
+                <span>Prix vente conseillé HT</span>
+                <strong>{suggestedPrice > 0 ? currency(suggestedPrice) : "Non calculé"}</strong>
+                <small>Marge nette min. 30% après {company.corporateTaxRate || 0}% d'imposition</small>
               </div>
             </div>
             <div className="stockBlock">
@@ -5565,7 +5520,7 @@ function CatalogManager({
                       />
                     </label>
                     <div className="stockUnitReadout">
-                      <span>UnitÃ© stock</span>
+                      <span>Unité stock</span>
                       <strong>{draft.unit || "u"}</strong>
                     </div>
                     <label>
@@ -5577,7 +5532,7 @@ function CatalogManager({
                           patch(item, { supplierId: supplier?.id, supplier: supplier?.name || "" });
                         }}
                       >
-                        <option value="">Non rattachÃ©</option>
+                        <option value="">Non rattaché</option>
                         {[...suppliers]
                           .sort((a, b) => a.name.localeCompare(b.name, "fr"))
                           .map((supplier) => (
@@ -5590,7 +5545,7 @@ function CatalogManager({
                     <label>
                       Emplacement
                       <input
-                        placeholder="Atelier, dÃ©pÃ´t..."
+                        placeholder="Atelier, dépôt..."
                         value={draft.location}
                         onChange={(event) => patch(item, { location: event.target.value })}
                       />
@@ -5601,7 +5556,7 @@ function CatalogManager({
                     type="button"
                     onClick={() => setMovementOpen((open) => ({ ...open, [item.id]: !open[item.id] }))}
                   >
-                    {movementOpen[item.id] ? "Masquer entrÃ©es / sorties" : "EntrÃ©es / sorties"}
+                    {movementOpen[item.id] ? "Masquer entrées / sorties" : "Entrées / sorties"}
                   </button>
                   {movementOpen[item.id] && (
                     <div className="stockMovementPanel">
@@ -5609,7 +5564,7 @@ function CatalogManager({
                         <input
                           type="number"
                           min="0"
-                          placeholder="QtÃ©"
+                          placeholder="Qté"
                           value={movementDraft(item.id).quantity}
                           onChange={(event) => patchMovementDraft(item.id, { quantity: event.target.value })}
                         />
@@ -5619,7 +5574,7 @@ function CatalogManager({
                           onChange={(event) => patchMovementDraft(item.id, { reason: event.target.value })}
                         />
                         <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(draft, "entry")}>
-                          EntrÃ©e
+                          Entrée
                         </button>
                         <button className="ghost subtleButton" type="button" onClick={() => applyStockMovement(draft, "exit")}>
                           Sortie
@@ -5650,7 +5605,7 @@ function CatalogManager({
         {!filtered.length && (
           <div className="emptyRows">
             {items.length
-              ? "Aucun Ã©lÃ©ment ne correspond Ã  cette recherche ou Ã  ce filtre."
+              ? "Aucun élément ne correspond à cette recherche ou à ce filtre."
               : "Le catalogue est vide. Ajoutez un premier article ou une prestation."}
           </div>
         )}
@@ -5690,7 +5645,6 @@ function ClientFolder({
   onCreateDocument: (type: DocumentType) => void;
 }) {
   const subClients = clients.filter((entry) => entry.parentId === client.id).sort((a, b) => a.name.localeCompare(b.name, "fr"));
-  const parentClient = client.parentId ? clients.find((entry) => entry.id === client.parentId) : undefined;
   const [clientTab, setClientTab] = useState<"card" | "subClients">("card");
   useEffect(() => setClientTab("card"), [client.id]);
   const invoiceDue = documents.reduce((sum, doc) => {
@@ -5933,22 +5887,22 @@ function ClientCard({
 }
 
 const companyIdentityFields: Array<[keyof CompanySettings, string, "text" | "number", string]> = [
-  ["name", "Nom commercial", "text", "Votre sociÃ©tÃ©"],
+  ["name", "Nom commercial", "text", "Votre société"],
   ["legalName", "Raison sociale", "text", "SARL / SAS / EI"],
   ["siret", "SIRET", "text", "123 456 789 00010"],
-  ["vatNumber", "NÂ° TVA", "text", "FR..."],
+  ["vatNumber", "N° TVA", "text", "FR..."],
   ["address", "Adresse", "text", "12 rue des Copeaux"],
   ["postalCode", "Code postal", "text", "75000"],
   ["city", "Ville", "text", "Paris"],
-  ["phone", "TÃ©lÃ©phone", "text", "01 23 45 67 89"],
+  ["phone", "Téléphone", "text", "01 23 45 67 89"],
   ["email", "Email", "text", "contact@societe.fr"],
   ["website", "Site web", "text", "https://..."],
   ["iban", "IBAN", "text", "FR76..."],
   ["bic", "BIC", "text", "ABCDEFGH"],
-  ["quoteValidityDays", "ValiditÃ© devis (jours)", "number", "30"],
-  ["defaultVatRate", "TVA par dÃ©faut", "number", "20"],
-  ["defaultDepositRate", "Acompte par dÃ©faut", "number", "30"],
-  ["corporateTaxRate", "Imposition societe", "number", "25"],
+  ["quoteValidityDays", "Validité devis (jours)", "number", "30"],
+  ["defaultVatRate", "TVA par défaut", "number", "20"],
+  ["defaultDepositRate", "Acompte par défaut", "number", "30"],
+  ["corporateTaxRate", "Imposition société", "number", "25"],
 ];
 
 function CompanySettingsEditor({
@@ -6009,7 +5963,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "identity" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> EnregistrÃ©
+                <Check size={16} /> Enregistré
               </span>
             )}
             <button
@@ -6019,7 +5973,7 @@ function CompanySettingsEditor({
               onClick={saveIdentity}
             >
               {savedBlock === "identity" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "identity" ? "Enregistrementâ€¦" : "Enregistrer"}
+              {savingBlock === "identity" ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -6028,8 +5982,8 @@ function CompanySettingsEditor({
       <section className="companySettingsBlock accountingSettingsBlock">
         <div className="companySettingsBlockTitle">
           <div>
-            <strong>ComptabilitÃ©</strong>
-            <span>RÃ©glage simple utilisÃ© dans le PDF du livre des comptes.</span>
+            <strong>Comptabilité</strong>
+            <span>Réglage simple utilisé dans le PDF du livre des comptes.</span>
           </div>
         </div>
         <label className="settingsToggle">
@@ -6040,15 +5994,15 @@ function CompanySettingsEditor({
             onChange={(event) => setIncludeVatInNetEstimateDraft(event.target.checked)}
           />
           <span>
-            <strong>DÃ©duire la TVA du net final estimÃ©</strong>
-            <small>ActivÃ© : lecture trÃ©sorerie. DÃ©sactivÃ© : rÃ©sultat aprÃ¨s impÃ´t, TVA suivie sÃ©parÃ©ment.</small>
+            <strong>Déduire la TVA du net final estimé</strong>
+            <small>Activé : lecture trésorerie. Désactivé : résultat après impôt, TVA suivie séparément.</small>
           </span>
         </label>
         {!readOnly && (
           <div className="settingsSaveAction">
             {savedBlock === "accounting" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> EnregistrÃ©
+                <Check size={16} /> Enregistré
               </span>
             )}
             <button
@@ -6058,7 +6012,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("accounting", { ...company, includeVatInNetEstimate: includeVatInNetEstimateDraft })}
             >
               {savedBlock === "accounting" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "accounting" ? "Enregistrementâ€¦" : "Enregistrer"}
+              {savingBlock === "accounting" ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -6069,7 +6023,7 @@ function CompanySettingsEditor({
           Conditions de paiement
           <textarea
             disabled={readOnly}
-            placeholder="Ex. : 30 % d'acompte Ã  la commande..."
+            placeholder="Ex. : 30 % d'acompte à la commande..."
             value={paymentTermsDraft}
             onChange={(event) => setPaymentTermsDraft(event.target.value)}
           />
@@ -6078,7 +6032,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "payment" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> EnregistrÃ©
+                <Check size={16} /> Enregistré
               </span>
             )}
             <button
@@ -6088,7 +6042,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("payment", { ...company, paymentTerms: paymentTermsDraft })}
             >
               {savedBlock === "payment" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "payment" ? "Enregistrementâ€¦" : "Enregistrer"}
+              {savingBlock === "payment" ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -6096,10 +6050,10 @@ function CompanySettingsEditor({
 
       <section className="companySettingsBlock">
         <label className="fullLabel">
-          Note par dÃ©faut
+          Note par défaut
           <textarea
             disabled={readOnly}
-            placeholder="Note affichÃ©e sur les nouveaux documents"
+            placeholder="Note affichée sur les nouveaux documents"
             value={notesDraft}
             onChange={(event) => setNotesDraft(event.target.value)}
           />
@@ -6108,7 +6062,7 @@ function CompanySettingsEditor({
           <div className="settingsSaveAction">
             {savedBlock === "notes" && (
               <span className="inlineSaveConfirmation">
-                <Check size={16} /> EnregistrÃ©
+                <Check size={16} /> Enregistré
               </span>
             )}
             <button
@@ -6118,7 +6072,7 @@ function CompanySettingsEditor({
               onClick={() => void saveBlock("notes", { ...company, notes: notesDraft })}
             >
               {savedBlock === "notes" ? <Check size={17} /> : <Save size={17} />}
-              {savingBlock === "notes" ? "Enregistrementâ€¦" : "Enregistrer"}
+              {savingBlock === "notes" ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -6158,4 +6112,3 @@ function FormGrid<T extends CompanySettings>({
     </div>
   );
 }
-

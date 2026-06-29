@@ -37,7 +37,7 @@ begin
 
   get diagnostics deleted_count = row_count;
   if deleted_count = 0 then
-    raise exception 'Entreprise introuvable ou deja supprimee.';
+    raise exception 'Entreprise introuvable ou déjà supprimée.';
   end if;
 end;
 $$;
